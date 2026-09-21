@@ -320,7 +320,7 @@ func getNodesLatestStatus(ctx context.Context, req *rpc.JsonRpcRequest) (any, *r
 
 	// 如果指定 uuid 但找不到，直接返回 not found
 	if params.UUID != "" {
-		if _, ok := latest[params.UUID]; !ok {
+		if _, ok := latest[params.UUID]; !ok && !onlineSet[params.UUID] {
 			return nil, rpc.MakeError(rpc.InvalidParams, "Node not found", params.UUID)
 		}
 	}
@@ -401,7 +401,14 @@ func getNodesLatestStatus(ctx context.Context, req *rpc.JsonRpcRequest) (any, *r
 
 	// 选择逻辑
 	if params.UUID != "" { // 单个
-		appendOne(params.UUID, latest[params.UUID])
+		if rep, ok := latest[params.UUID]; ok {
+			appendOne(params.UUID, rep)
+		} else if onlineSet[params.UUID] {
+			respMap[params.UUID] = recordLike{
+				Client: params.UUID,
+				Online: true,
+			}
+		}
 		return respMap[params.UUID], nil
 	}
 	selected := map[string]bool{}
@@ -414,10 +421,28 @@ func getNodesLatestStatus(ctx context.Context, req *rpc.JsonRpcRequest) (any, *r
 				appendOne(uuid, rep)
 			}
 		}
+		for _, uuid := range onlineUUIDs {
+			if selected[uuid] {
+				if _, ok := respMap[uuid]; !ok {
+					respMap[uuid] = recordLike{
+						Client: uuid,
+						Online: true,
+					}
+				}
+			}
+		}
 		return respMap, nil
 	}
 	for uuid, rep := range latest {
 		appendOne(uuid, rep)
+	}
+	for _, uuid := range onlineUUIDs {
+		if _, ok := respMap[uuid]; !ok {
+			respMap[uuid] = recordLike{
+				Client: uuid,
+				Online: true,
+			}
+		}
 	}
 	return respMap, nil
 }

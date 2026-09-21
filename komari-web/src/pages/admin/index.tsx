@@ -2560,7 +2560,11 @@ function DetailView({ node }: { node: NodeDetail }) {
   const { t } = useTranslation();
   const isMobile = useIsMobile();
   const { live_data } = useLiveData();
-  const isOnline = Boolean(live_data?.data?.online?.includes(node.uuid));
+  const isOnline = Boolean(
+    live_data?.data?.online?.some(
+      (id) => id === node.uuid || id?.toLowerCase() === node.uuid?.toLowerCase()
+    )
+  );
 
   return (
     <Drawer direction={isMobile ? "bottom" : "right"}>

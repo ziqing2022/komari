@@ -44,9 +44,9 @@ const mergeLiveData = (
   result: Record<string, any>,
   previous: LiveDataResponse | null,
 ): LiveDataResponse => {
-  const nextOnline = Object.values(result)
-    .filter((value: any) => value?.online)
-    .map((value: any) => value.client as string);
+  const nextOnline = Object.entries(result || {})
+    .filter(([_, value]: [string, any]) => Boolean(value?.online))
+    .map(([uuid, value]: [string, any]) => (value?.client || uuid) as string);
   const previousData = previous?.data;
   const online =
     previousData && sameStringArray(previousData.online, nextOnline)

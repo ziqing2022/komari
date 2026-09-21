@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import {
   Button,
@@ -22,7 +22,6 @@ import {
   FileText,
   AlertCircle,
   CheckCircle2,
-  Server,
   ShieldCheck,
   RefreshCw,
   Terminal,
@@ -772,8 +771,7 @@ const CronContent = () => {
                 <Loading />
               ) : (
                 <NodeSelector
-                  nodes={nodeDetail || []}
-                  selectedNodes={formTargetNodes}
+                  value={formTargetNodes}
                   onChange={setFormTargetNodes}
                 />
               )}

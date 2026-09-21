@@ -2,12 +2,165 @@ import express from 'express';
 import http from 'http';
 import path from 'path';
 import fs from 'fs';
+import crypto from 'crypto';
 import { WebSocketServer, WebSocket } from 'ws';
 
 const app = express();
 const PORT = 3000;
 
 app.use(express.json());
+
+// User Account & 2FA Setup
+interface UserAccount {
+  uuid: string;
+  username: string;
+  role: string;
+  logged_in: boolean;
+  created_at: string;
+  "2fa_enabled": boolean;
+  two_factor?: string;
+  sso_type?: string;
+  sso_id?: string;
+}
+
+const USER_ACCOUNT_FILE = path.join(process.cwd(), 'komari-web', 'user-account.json');
+
+function loadUserAccount(): UserAccount {
+  const defaultAccount: UserAccount = {
+    uuid: 'admin-user-01',
+    username: 'admin',
+    role: 'admin',
+    logged_in: true,
+    created_at: '2024-01-01T00:00:00Z',
+    "2fa_enabled": true,
+    two_factor: 'JBSWY3DPEHPK3PXP',
+    sso_type: '',
+    sso_id: ''
+  };
+
+  try {
+    if (fs.existsSync(USER_ACCOUNT_FILE)) {
+      const data = JSON.parse(fs.readFileSync(USER_ACCOUNT_FILE, 'utf-8'));
+      return { ...defaultAccount, ...data };
+    }
+  } catch (e) {
+    console.error('Error reading user-account.json:', e);
+  }
+  saveUserAccount(defaultAccount);
+  return defaultAccount;
+}
+
+function saveUserAccount(account: UserAccount) {
+  try {
+    fs.writeFileSync(USER_ACCOUNT_FILE, JSON.stringify(account, null, 2), 'utf-8');
+  } catch (e) {
+    console.error('Error writing user-account.json:', e);
+  }
+}
+
+// RFC 3548 / RFC 4648 Base32 Decoder
+function base32Decode(base32: string): Buffer {
+  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+  const cleaned = base32.toUpperCase().replace(/=+$/, '').replace(/[\s-]/g, '');
+  let bits = 0;
+  let value = 0;
+  const bytes: number[] = [];
+  for (let i = 0; i < cleaned.length; i++) {
+    const idx = alphabet.indexOf(cleaned[i]);
+    if (idx === -1) continue;
+    value = (value << 5) | idx;
+    bits += 5;
+    if (bits >= 8) {
+      bytes.push((value >>> (bits - 8)) & 255);
+      bits -= 8;
+    }
+  }
+  return Buffer.from(bytes);
+}
+
+// RFC 6238 TOTP Generator (30-second window, 6 digits)
+function generateTOTP(secret: string, timeStepOffset = 0): string {
+  const secretBuffer = base32Decode(secret);
+  const timeStep = 30;
+  const counter = Math.floor(Date.now() / 1000 / timeStep) + timeStepOffset;
+  const counterBuffer = Buffer.alloc(8);
+  counterBuffer.writeBigInt64BE(BigInt(counter));
+
+  const hmac = crypto.createHmac('sha1', secretBuffer).update(counterBuffer).digest();
+  const offset = hmac[hmac.length - 1] & 0x0f;
+  const code =
+    ((hmac[offset] & 0x7f) << 24) |
+    ((hmac[offset + 1] & 0xff) << 16) |
+    ((hmac[offset + 2] & 0xff) << 8) |
+    (hmac[offset + 3] & 0xff);
+
+  return (code % 1000000).toString().padStart(6, '0');
+}
+
+// Verify TOTP within ±1 step (90-second total validity window)
+function verifyTOTP(token: string, secret: string): boolean {
+  if (!token || !secret) return false;
+  const cleanedToken = token.trim();
+  if (cleanedToken.length !== 6 || !/^\d{6}$/.test(cleanedToken)) return false;
+
+  for (const offset of [-1, 0, 1]) {
+    if (generateTOTP(secret, offset) === cleanedToken) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// Extract 2FA code from headers, body, or query
+function get2FACodeFromReq(req: express.Request): string {
+  const headers = req.headers;
+  if (headers['x-2fa-code']) return String(headers['x-2fa-code']).trim();
+  if (headers['x-two-factor-code']) return String(headers['x-two-factor-code']).trim();
+
+  if (req.query) {
+    if (req.query['2fa_code']) return String(req.query['2fa_code']).trim();
+    if (req.query['code']) return String(req.query['code']).trim();
+    if (req.query['otp']) return String(req.query['otp']).trim();
+  }
+
+  if (req.body && typeof req.body === 'object') {
+    if (req.body['2fa_code']) return String(req.body['2fa_code']).trim();
+    if (req.body['two_factor_code']) return String(req.body['two_factor_code']).trim();
+    if (req.body['code']) return String(req.body['code']).trim();
+    if (req.body['otp']) return String(req.body['otp']).trim();
+  }
+
+  return '';
+}
+
+// Middleware: RequireSensitive2FA (equivalent to Go RequireSensitive2FA)
+function requireSensitive2FA(req: express.Request, res: express.Response, next: express.NextFunction) {
+  const account = loadUserAccount();
+  if (!account['2fa_enabled'] || !account.two_factor) {
+    // 2FA is not enabled on user account, allow operation
+    return next();
+  }
+
+  const code = get2FACodeFromReq(req);
+  if (!code) {
+    return res.status(401).json({
+      status: 'error',
+      message: '此敏感操作需要 2FA 动态验证码 (2FA code is required)'
+    });
+  }
+
+  const isValid = verifyTOTP(code, account.two_factor);
+  console.log(`[2FA Validation] Received Code: "${code}", Expected TOTP: "${generateTOTP(account.two_factor)}", Valid: ${isValid}`);
+
+  if (!isValid) {
+    return res.status(401).json({
+      status: 'error',
+      message: '2FA 验证码错误 (Invalid 2FA code)'
+    });
+  }
+
+  next();
+}
 
 // Load komari-theme.json
 const themeFilePath = path.join(process.cwd(), 'komari-web', 'komari-theme.json');
@@ -288,18 +441,70 @@ app.get('/api/public', (_req, res) => {
   });
 });
 
-// 3. Current User API
+// 3. Current User API & 2FA Management
 app.get('/api/me', (_req, res) => {
+  const user = loadUserAccount();
   res.json({
+    username: user.username,
+    logged_in: user.logged_in,
+    uuid: user.uuid,
+    sso_type: user.sso_type || '',
+    sso_id: user.sso_id || '',
+    '2fa_enabled': Boolean(user['2fa_enabled']),
     status: 'success',
     data: {
-      uuid: 'admin-user-01',
-      username: 'admin',
-      role: 'admin',
-      logged_in: true,
-      created_at: '2024-01-01T00:00:00Z'
+      uuid: user.uuid,
+      username: user.username,
+      role: user.role,
+      logged_in: user.logged_in,
+      created_at: user.created_at,
+      '2fa_enabled': Boolean(user['2fa_enabled'])
     }
   });
+});
+
+let pending2FASecret = '';
+
+app.get('/api/admin/2fa/generate', (_req, res) => {
+  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+  let secret = '';
+  for (let i = 0; i < 32; i++) {
+    secret += alphabet[Math.floor(Math.random() * alphabet.length)];
+  }
+  pending2FASecret = secret;
+
+  // Minimal valid 1x1 PNG image as QR placeholder
+  const png1x1 = Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
+    'base64'
+  );
+  res.cookie('2fa_secret', secret, { maxAge: 1800000, httpOnly: true, path: '/' });
+  res.setHeader('Content-Type', 'image/png');
+  res.send(png1x1);
+});
+
+app.post('/api/admin/2fa/enable', (req, res) => {
+  const code = (req.query.code as string) || (req.body?.code as string) || '';
+  const secret = pending2FASecret || 'JBSWY3DPEHPK3PXP';
+  if (!code) {
+    return res.status(400).json({ status: 'error', message: '2FA secret or code not provided' });
+  }
+  if (!verifyTOTP(code, secret)) {
+    return res.status(400).json({ status: 'error', message: 'Invalid 2FA code' });
+  }
+  const account = loadUserAccount();
+  account['2fa_enabled'] = true;
+  account.two_factor = secret;
+  saveUserAccount(account);
+  res.json({ status: 'success', data: '2FA enabled successfully' });
+});
+
+app.post('/api/admin/2fa/disable', requireSensitive2FA, (_req, res) => {
+  const account = loadUserAccount();
+  account['2fa_enabled'] = false;
+  account.two_factor = '';
+  saveUserAccount(account);
+  res.json({ status: 'success', message: '2FA disabled successfully' });
 });
 
 // 4. Admin Clients & Ping Endpoints
@@ -418,11 +623,12 @@ function saveCronTasks(tasks: CronTaskItem[]) {
 
 let cronTasksList: CronTaskItem[] = loadCronTasks();
 
-function matchTaskId(task: CronTaskItem, queryId: string): boolean {
+function matchTaskId(task: CronTaskItem, queryId: string | string[] | undefined): boolean {
   if (!queryId) return false;
-  if (task.id === queryId) return true;
+  const qId = Array.isArray(queryId) ? queryId[0] : String(queryId);
+  if (task.id === qId) return true;
   const num1 = task.id.replace(/^(cron|task)-/, '');
-  const num2 = queryId.replace(/^(cron|task)-/, '');
+  const num2 = qId.replace(/^(cron|task)-/, '');
   return num1 === num2 && num1 !== '';
 }
 
@@ -435,7 +641,7 @@ app.get('/api/admin/cron', (_req, res) => {
   });
 });
 
-app.post('/api/admin/cron', (req, res) => {
+app.post('/api/admin/cron', requireSensitive2FA, (req, res) => {
   const { name, command, schedule_type, interval_minutes, cron_expression, target_nodes, enabled } = req.body;
   if (!name || !command) {
     return res.status(400).json({ status: 'error', message: 'Task name and command are required.' });
@@ -461,7 +667,7 @@ app.post('/api/admin/cron', (req, res) => {
   res.json({ status: 'success', task: newTask });
 });
 
-app.put('/api/admin/cron/:id', (req, res) => {
+app.put('/api/admin/cron/:id', requireSensitive2FA, (req, res) => {
   const { id } = req.params;
   const idx = cronTasksList.findIndex((t) => matchTaskId(t, id));
   if (idx === -1) {
@@ -477,7 +683,7 @@ app.put('/api/admin/cron/:id', (req, res) => {
   res.json({ status: 'success', task: cronTasksList[idx] });
 });
 
-app.delete('/api/admin/cron/:id', (req, res) => {
+app.delete('/api/admin/cron/:id', requireSensitive2FA, (req, res) => {
   const { id } = req.params;
   cronTasksList = cronTasksList.filter((t) => !matchTaskId(t, id));
   saveCronTasks(cronTasksList);
@@ -496,7 +702,7 @@ app.post('/api/admin/cron/:id/toggle', (req, res) => {
   res.json({ status: 'success', enabled: task.enabled });
 });
 
-app.post('/api/admin/cron/:id/run', (req, res) => {
+app.post('/api/admin/cron/:id/run', requireSensitive2FA, (req, res) => {
   const { id } = req.params;
   const task = cronTasksList.find((t) => matchTaskId(t, id));
   if (!task) {

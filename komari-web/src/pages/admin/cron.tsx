@@ -271,15 +271,6 @@ const CronContent = () => {
       updated_at: new Date().toISOString(),
     };
 
-    setTasks((prev) => {
-      const nextTasks = editingTask
-        ? prev.map((t) => (t.id === editingTask.id ? updatedItem : t))
-        : [updatedItem, ...prev];
-      localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(nextTasks));
-      localStorage.setItem(LOCAL_STORAGE_INIT_KEY, "true");
-      return nextTasks;
-    });
-
     try {
       const url = editingTask
         ? `/api/admin/cron/${editingTask.id}`
@@ -293,7 +284,7 @@ const CronContent = () => {
         headers["X-2FA-Code"] = form2FaCode.trim();
       }
 
-      await fetch(url, {
+      const res = await fetch(url, {
         method,
         headers,
         body: JSON.stringify({
@@ -301,40 +292,63 @@ const CronContent = () => {
           "2fa_code": form2FaCode.trim() || undefined,
         }),
       });
+
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.message || (res.status === 401 ? "2FA 验证码错误" : `保存失败 (${res.status})`));
+      }
+
+      const resData = await res.json().catch(() => ({}));
+      const savedTask = resData.task || updatedItem;
+
+      setTasks((prev) => {
+        const nextTasks = editingTask
+          ? prev.map((t) => (t.id === editingTask.id ? savedTask : t))
+          : [savedTask, ...prev];
+        localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(nextTasks));
+        localStorage.setItem(LOCAL_STORAGE_INIT_KEY, "true");
+        return nextTasks;
+      });
+
+      setEditDialogOpen(false);
+      setForm2FaCode("");
+      toast.success(t("cron.saveSuccess", "定时任务已成功保存"));
     } catch (err: any) {
-      console.warn("API save warning:", err);
+      console.warn("API save error:", err);
+      toast.error(err.message || t("common.error", "保存失败，请检查验证码"));
     } finally {
       setSaving(false);
-      setEditDialogOpen(false);
-      toast.success(t("cron.saveSuccess", "定时任务已成功保存"));
     }
   };
 
-  // Toggle Enable/Pause with 2FA check
+  // Toggle Enable/Pause
   const handleToggleStatus = async (task: CronTask) => {
     const nextStatus = !task.enabled;
     const targetId = task.id;
 
-    setTasks((prev) => {
-      const updated = prev.map((item) =>
-        item.id === targetId ? { ...item, enabled: nextStatus, updated_at: new Date().toISOString() } : item
-      );
-      localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(updated));
-      localStorage.setItem(LOCAL_STORAGE_INIT_KEY, "true");
-      return updated;
-    });
-
     try {
-      await fetch(`/api/admin/cron/${targetId}/toggle`, {
+      const res = await fetch(`/api/admin/cron/${targetId}/toggle`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ enabled: nextStatus }),
       });
-    } catch (e) {
-      console.warn("API toggle warning:", e);
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.message || "更新状态失败");
+      }
+      setTasks((prev) => {
+        const updated = prev.map((item) =>
+          item.id === targetId ? { ...item, enabled: nextStatus, updated_at: new Date().toISOString() } : item
+        );
+        localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(updated));
+        localStorage.setItem(LOCAL_STORAGE_INIT_KEY, "true");
+        return updated;
+      });
+      toast.success(t("cron.statusUpdated", "任务状态已更新"));
+    } catch (e: any) {
+      console.warn("API toggle error:", e);
+      toast.error(e.message || "更新状态失败");
     }
-
-    toast.success(t("cron.statusUpdated", "任务状态已更新"));
   };
 
   // Trigger Immediate Run
@@ -362,22 +376,28 @@ const CronContent = () => {
         headers["X-2FA-Code"] = run2FaCode.trim();
       }
 
-      await fetch(`/api/admin/cron/${targetId}/run`, {
+      const res = await fetch(`/api/admin/cron/${targetId}/run`, {
         method: "POST",
         headers,
         body: JSON.stringify({ "2fa_code": run2FaCode.trim() || undefined }),
       });
-    } catch (err: any) {
-      console.warn("API run warning:", err);
-    } finally {
+
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.message || (res.status === 401 ? "2FA 验证码错误" : `执行失败 (${res.status})`));
+      }
+
+      const resJson = await res.json().catch(() => ({}));
+      const updatedTask = resJson.task;
+
       setTasks((prev) => {
         const updated = prev.map((item) =>
           item.id === targetId
             ? {
                 ...item,
-                last_run_at: new Date().toISOString(),
-                last_exit_code: 0,
-                last_result: `[Manual Execution at ${new Date().toLocaleTimeString()}] Exit code: 0`,
+                last_run_at: updatedTask?.last_run_at || new Date().toISOString(),
+                last_exit_code: updatedTask?.last_exit_code ?? 0,
+                last_result: updatedTask?.last_result || `[Manual Execution at ${new Date().toLocaleTimeString()}] Exit code: 0`,
                 updated_at: new Date().toISOString(),
               }
             : item
@@ -385,9 +405,15 @@ const CronContent = () => {
         localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(updated));
         return updated;
       });
-      setRunning(false);
+
       setRunDialogOpen(false);
+      setRun2FaCode("");
       toast.success(t("cron.runSuccess", "已触发即时执行"));
+    } catch (err: any) {
+      console.warn("API run error:", err);
+      toast.error(err.message || t("common.error", "执行失败，请检查验证码"));
+    } finally {
+      setRunning(false);
     }
   };
 
@@ -408,13 +434,6 @@ const CronContent = () => {
     setDeleting(true);
     const targetId = taskToDelete.id;
 
-    setTasks((prev) => {
-      const remaining = prev.filter((item) => item.id !== targetId);
-      localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(remaining));
-      localStorage.setItem(LOCAL_STORAGE_INIT_KEY, "true");
-      return remaining;
-    });
-
     try {
       const headers: Record<string, string> = {
         "Content-Type": "application/json",
@@ -423,17 +442,32 @@ const CronContent = () => {
         headers["X-2FA-Code"] = delete2FaCode.trim();
       }
 
-      await fetch(`/api/admin/cron/${targetId}`, {
+      const res = await fetch(`/api/admin/cron/${targetId}`, {
         method: "DELETE",
         headers,
         body: JSON.stringify({ "2fa_code": delete2FaCode.trim() || undefined }),
       });
+
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.message || (res.status === 401 ? "2FA 验证码错误" : `删除失败 (${res.status})`));
+      }
+
+      setTasks((prev) => {
+        const remaining = prev.filter((item) => item.id !== targetId);
+        localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(remaining));
+        localStorage.setItem(LOCAL_STORAGE_INIT_KEY, "true");
+        return remaining;
+      });
+
+      setDeleteDialogOpen(false);
+      setDelete2FaCode("");
+      toast.success(t("cron.deleteSuccess", "定时任务已成功删除"));
     } catch (err: any) {
-      console.warn("API delete warning:", err);
+      console.warn("API delete error:", err);
+      toast.error(err.message || t("common.error", "删除失败，请检查验证码"));
     } finally {
       setDeleting(false);
-      setDeleteDialogOpen(false);
-      toast.success(t("cron.deleteSuccess", "定时任务已成功删除"));
     }
   };
 

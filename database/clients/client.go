@@ -3,14 +3,14 @@ package clients
 import (
 	"encoding/json"
 	"fmt"
-	logger "github.com/komari-monitor/komari/utils/log"
+	logger "github.com/ziqing2022/komari/utils/log"
 	"math"
 	"time"
 
-	"github.com/komari-monitor/komari/database/dbcore"
-	"github.com/komari-monitor/komari/database/models"
-	"github.com/komari-monitor/komari/database/tasks"
-	"github.com/komari-monitor/komari/utils"
+	"github.com/ziqing2022/komari/database/dbcore"
+	"github.com/ziqing2022/komari/database/models"
+	"github.com/ziqing2022/komari/database/tasks"
+	"github.com/ziqing2022/komari/utils"
 
 	"github.com/google/uuid"
 )

@@ -6,13 +6,13 @@ import (
 	"net"
 	"time"
 
-	"github.com/komari-monitor/komari/database/dbcore"
-	"github.com/komari-monitor/komari/database/models"
-	messageevent "github.com/komari-monitor/komari/database/models/messageEvent"
-	"github.com/komari-monitor/komari/internal/config"
-	"github.com/komari-monitor/komari/utils"
-	"github.com/komari-monitor/komari/utils/geoip"
-	"github.com/komari-monitor/komari/utils/messageSender"
+	"github.com/ziqing2022/komari/database/dbcore"
+	"github.com/ziqing2022/komari/database/models"
+	messageevent "github.com/ziqing2022/komari/database/models/messageEvent"
+	"github.com/ziqing2022/komari/internal/config"
+	"github.com/ziqing2022/komari/utils"
+	"github.com/ziqing2022/komari/utils/geoip"
+	"github.com/ziqing2022/komari/utils/messageSender"
 )
 
 // GetAllSessions 获取所有会话

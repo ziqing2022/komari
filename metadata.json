@@ -1,0 +1,6 @@
+{
+  "name": "Komari Server Monitor",
+  "description": "A lightweight, self-hosted server monitoring dashboard with real-time telemetry, node health status, network metrics, and ping latency tracking.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

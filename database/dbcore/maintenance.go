@@ -9,7 +9,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/komari-monitor/komari/cmd/flags"
+	"github.com/ziqing2022/komari/cmd/flags"
 )
 
 var maintenanceMu sync.Mutex

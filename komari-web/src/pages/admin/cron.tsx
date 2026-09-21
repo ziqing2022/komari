@@ -277,11 +277,12 @@ const CronContent = () => {
         : "/api/admin/cron";
       const method = editingTask ? "PUT" : "POST";
 
+      const clean2FaCode = form2FaCode.replace(/[\s-]/g, "").trim();
       const headers: Record<string, string> = {
         "Content-Type": "application/json",
       };
-      if (form2FaCode.trim()) {
-        headers["X-2FA-Code"] = form2FaCode.trim();
+      if (clean2FaCode) {
+        headers["X-2FA-Code"] = clean2FaCode;
       }
 
       const res = await fetch(url, {
@@ -289,7 +290,7 @@ const CronContent = () => {
         headers,
         body: JSON.stringify({
           ...updatedItem,
-          "2fa_code": form2FaCode.trim() || undefined,
+          "2fa_code": clean2FaCode || undefined,
         }),
       });
 
@@ -360,7 +361,8 @@ const CronContent = () => {
 
   const handleConfirmRunNow = async () => {
     if (!taskToRun) return;
-    if (twoFaEnabled && !run2FaCode.trim()) {
+    const clean2FaCode = run2FaCode.replace(/[\s-]/g, "").trim();
+    if (twoFaEnabled && !clean2FaCode) {
       toast.error(t("cron.twoFaPrompt", "请输入 6 位 2FA 验证码"));
       return;
     }
@@ -372,14 +374,14 @@ const CronContent = () => {
       const headers: Record<string, string> = {
         "Content-Type": "application/json",
       };
-      if (run2FaCode.trim()) {
-        headers["X-2FA-Code"] = run2FaCode.trim();
+      if (clean2FaCode) {
+        headers["X-2FA-Code"] = clean2FaCode;
       }
 
       const res = await fetch(`/api/admin/cron/${targetId}/run`, {
         method: "POST",
         headers,
-        body: JSON.stringify({ "2fa_code": run2FaCode.trim() || undefined }),
+        body: JSON.stringify({ "2fa_code": clean2FaCode || undefined }),
       });
 
       if (!res.ok) {
@@ -426,7 +428,8 @@ const CronContent = () => {
 
   const handleConfirmDelete = async () => {
     if (!taskToDelete) return;
-    if (twoFaEnabled && !delete2FaCode.trim()) {
+    const clean2FaCode = delete2FaCode.replace(/[\s-]/g, "").trim();
+    if (twoFaEnabled && !clean2FaCode) {
       toast.error(t("cron.twoFaPrompt", "请输入 6 位 2FA 验证码"));
       return;
     }
@@ -438,14 +441,14 @@ const CronContent = () => {
       const headers: Record<string, string> = {
         "Content-Type": "application/json",
       };
-      if (delete2FaCode.trim()) {
-        headers["X-2FA-Code"] = delete2FaCode.trim();
+      if (clean2FaCode) {
+        headers["X-2FA-Code"] = clean2FaCode;
       }
 
       const res = await fetch(`/api/admin/cron/${targetId}`, {
         method: "DELETE",
         headers,
-        body: JSON.stringify({ "2fa_code": delete2FaCode.trim() || undefined }),
+        body: JSON.stringify({ "2fa_code": clean2FaCode || undefined }),
       });
 
       if (!res.ok) {
@@ -866,9 +869,9 @@ const CronContent = () => {
                 <TextField.Root
                   type="text"
                   inputMode="numeric"
-                  maxLength={6}
+                  maxLength={8}
                   value={form2FaCode}
-                  onChange={(e) => setForm2FaCode((e.target as HTMLInputElement).value)}
+                  onChange={(e) => setForm2FaCode((e.target as HTMLInputElement).value.replace(/\s+/g, ""))}
                   placeholder="000000"
                   className="max-w-[160px]"
                 />
@@ -903,9 +906,9 @@ const CronContent = () => {
               <TextField.Root
                 type="text"
                 inputMode="numeric"
-                maxLength={6}
+                maxLength={8}
                 value={run2FaCode}
-                onChange={(e) => setRun2FaCode((e.target as HTMLInputElement).value)}
+                onChange={(e) => setRun2FaCode((e.target as HTMLInputElement).value.replace(/\s+/g, ""))}
                 placeholder="000000"
               />
             </div>
@@ -945,9 +948,9 @@ const CronContent = () => {
               <TextField.Root
                 type="text"
                 inputMode="numeric"
-                maxLength={6}
+                maxLength={8}
                 value={delete2FaCode}
-                onChange={(e) => setDelete2FaCode((e.target as HTMLInputElement).value)}
+                onChange={(e) => setDelete2FaCode((e.target as HTMLInputElement).value.replace(/\s+/g, ""))}
                 placeholder="000000"
               />
             </div>

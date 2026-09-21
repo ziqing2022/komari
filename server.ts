@@ -3,6 +3,7 @@ import http from 'http';
 import path from 'path';
 import fs from 'fs';
 import crypto from 'crypto';
+import QRCode from 'qrcode';
 import { WebSocketServer, WebSocket } from 'ws';
 
 const app = express();
@@ -97,13 +98,13 @@ function generateTOTP(secret: string, timeStepOffset = 0): string {
   return (code % 1000000).toString().padStart(6, '0');
 }
 
-// Verify TOTP within ±1 step (90-second total validity window)
+// Verify TOTP within ±3 steps (to accommodate network latency & clock drift)
 function verifyTOTP(token: string, secret: string): boolean {
   if (!token || !secret) return false;
-  const cleanedToken = token.trim();
+  const cleanedToken = token.replace(/[\s-]/g, '').trim();
   if (cleanedToken.length !== 6 || !/^\d{6}$/.test(cleanedToken)) return false;
 
-  for (const offset of [-1, 0, 1]) {
+  for (const offset of [-3, -2, -1, 0, 1, 2, 3]) {
     if (generateTOTP(secret, offset) === cleanedToken) {
       return true;
     }
@@ -142,6 +143,12 @@ function requireSensitive2FA(req: express.Request, res: express.Response, next: 
   }
 
   const code = get2FACodeFromReq(req);
+  const logLine = `[${new Date().toISOString()}] ${req.method} ${req.originalUrl || req.url} | code="${code}" | 2fa_enabled=${account['2fa_enabled']} | secret="${account.two_factor}" | expected_current="${account.two_factor ? generateTOTP(account.two_factor) : ''}"\n`;
+  try {
+    fs.appendFileSync('/tmp/2fa_requests.log', logLine);
+  } catch (e) {}
+  console.log(logLine);
+
   if (!code) {
     return res.status(401).json({
       status: 'error',
@@ -465,7 +472,7 @@ app.get('/api/me', (_req, res) => {
 
 let pending2FASecret = '';
 
-app.get('/api/admin/2fa/generate', (_req, res) => {
+app.get('/api/admin/2fa/generate', async (_req, res) => {
   const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
   let secret = '';
   for (let i = 0; i < 32; i++) {
@@ -473,14 +480,31 @@ app.get('/api/admin/2fa/generate', (_req, res) => {
   }
   pending2FASecret = secret;
 
-  // Minimal valid 1x1 PNG image as QR placeholder
-  const png1x1 = Buffer.from(
-    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
-    'base64'
-  );
-  res.cookie('2fa_secret', secret, { maxAge: 1800000, httpOnly: true, path: '/' });
-  res.setHeader('Content-Type', 'image/png');
-  res.send(png1x1);
+  const otpauthUrl = `otpauth://totp/Komari%20Monitor:admin?secret=${secret}&issuer=Komari%20Monitor`;
+  try {
+    const pngBuffer = await QRCode.toBuffer(otpauthUrl, {
+      width: 250,
+      margin: 2,
+      errorCorrectionLevel: 'M'
+    });
+    res.cookie('2fa_secret', secret, { maxAge: 1800000, httpOnly: true, path: '/' });
+    res.setHeader('Content-Type', 'image/png');
+    res.send(pngBuffer);
+  } catch (err) {
+    res.status(500).json({ status: 'error', message: 'Failed to generate QR code' });
+  }
+});
+
+app.get('/api/admin/2fa/info', (_req, res) => {
+  const account = loadUserAccount();
+  res.json({
+    status: 'success',
+    data: {
+      "2fa_enabled": Boolean(account['2fa_enabled']),
+      two_factor_secret: account['2fa_enabled'] ? (account.two_factor || '') : '',
+      pending_secret: pending2FASecret || ''
+    }
+  });
 });
 
 app.post('/api/admin/2fa/enable', (req, res) => {
@@ -499,8 +523,14 @@ app.post('/api/admin/2fa/enable', (req, res) => {
   res.json({ status: 'success', data: '2FA enabled successfully' });
 });
 
-app.post('/api/admin/2fa/disable', requireSensitive2FA, (_req, res) => {
+app.post('/api/admin/2fa/disable', (req, res) => {
+  const code = get2FACodeFromReq(req);
   const account = loadUserAccount();
+  if (account['2fa_enabled'] && account.two_factor && code) {
+    if (!verifyTOTP(code, account.two_factor)) {
+      return res.status(401).json({ status: 'error', message: '2FA 验证码错误' });
+    }
+  }
   account['2fa_enabled'] = false;
   account.two_factor = '';
   saveUserAccount(account);
@@ -673,9 +703,15 @@ app.put('/api/admin/cron/:id', requireSensitive2FA, (req, res) => {
   if (idx === -1) {
     return res.status(404).json({ status: 'error', message: 'Task not found' });
   }
+  const bodyData = { ...req.body };
+  delete bodyData['2fa_code'];
+  delete bodyData['two_factor_code'];
+  delete bodyData['code'];
+  delete bodyData['otp'];
+
   cronTasksList[idx] = {
     ...cronTasksList[idx],
-    ...req.body,
+    ...bodyData,
     id: cronTasksList[idx].id, // preserve existing id
     updated_at: new Date().toISOString()
   };

@@ -361,6 +361,7 @@ const TwoFactorDisabled = () => {
   const [isLoading, setIsLoading] = React.useState(true);
   const [qrcode, setQRCode] = React.useState<string | null>(null);
   const [code, setCode] = React.useState<string>("");
+  const [secretText, setSecretText] = React.useState<string>("");
 
   React.useEffect(() => {
     if (isOpen) {
@@ -375,6 +376,12 @@ const TwoFactorDisabled = () => {
         .then((blob) => {
           const url = URL.createObjectURL(blob);
           setQRCode(url);
+          return fetch("/api/admin/2fa/info").then(r => r.json());
+        })
+        .then((info) => {
+          if (info?.data?.pending_secret) {
+            setSecretText(info.data.pending_secret);
+          }
         })
         .catch((err) => toast.error(err.message))
         .finally(() => setIsLoading(false));
@@ -383,12 +390,13 @@ const TwoFactorDisabled = () => {
 
   const handleEnable2fa = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!code) {
+    const cleanCode = code.replace(/[\s-]/g, "").trim();
+    if (!cleanCode) {
       toast.error(t("account.otp_empty_error"));
       return;
     }
     setSaving(true);
-    fetch(`/api/admin/2fa/enable?code=${encodeURIComponent(code)}`, {
+    fetch(`/api/admin/2fa/enable?code=${encodeURIComponent(cleanCode)}`, {
       method: "POST",
     })
       .then(async (res) => {
@@ -422,23 +430,29 @@ const TwoFactorDisabled = () => {
           <Dialog.Title>{t("account.enable_2fa")}</Dialog.Title>
           <Flex direction="column" gap="2">
             <label>{t("account.2fa_qr_code_hint")}</label>
-            <div className="flex justify-center">
+            <div className="flex justify-center bg-white p-3 rounded-lg w-fit mx-auto border">
               {isLoading ? (
                 <Skeleton width="200px" height="200px" />
               ) : (
                 <img src={qrcode!} alt="2FA QR Code" width={200} height={200} />
               )}
             </div>
+            {secretText && (
+              <div className="text-xs text-center text-muted-foreground">
+                <span>密钥 (Secret): </span>
+                <code className="bg-accent px-2 py-0.5 rounded font-mono font-bold select-all">{secretText}</code>
+              </div>
+            )}
             <label>{t("account.2fa_otp_input_prompt")}</label>
             <form className="km-account-2fa-form flex flex-col gap-2" onSubmit={handleEnable2fa}>
               <TextField.Root
                 type="text"
                 inputMode="numeric"
-                maxLength={6}
+                maxLength={8}
                 name="code"
                 placeholder="000000"
                 value={code}
-                onChange={(e) => setCode((e.target as HTMLInputElement).value)}
+                onChange={(e) => setCode((e.target as HTMLInputElement).value.replace(/\s+/g, ""))}
               />
               <Button disabled={saving} type="submit">
                 {t("account.enable_2fa")}
@@ -456,14 +470,24 @@ const TwoFactorEnabled = () => {
   const [isOpen, setIsOpen] = React.useState(false);
   const [saving, setSaving] = React.useState(false);
   const [code, setCode] = React.useState("");
+  const [currentSecret, setCurrentSecret] = React.useState("");
   const { refresh } = useAccount();
+
+  React.useEffect(() => {
+    fetch("/api/admin/2fa/info")
+      .then((r) => r.json())
+      .then((res) => {
+        if (res?.data?.two_factor_secret) {
+          setCurrentSecret(res.data.two_factor_secret);
+        }
+      })
+      .catch(() => {});
+  }, []);
+
   const disable2fa = () => {
-    if (!code) {
-      toast.error(t("account.otp_empty_error"));
-      return;
-    }
     setSaving(true);
-    fetch(`/api/admin/2fa/disable?2fa_code=${encodeURIComponent(code)}`, {
+    const cleanCode = code.replace(/[\s-]/g, "").trim();
+    fetch(`/api/admin/2fa/disable?2fa_code=${encodeURIComponent(cleanCode)}`, {
       method: "POST",
     })
       .then(async (response) => {
@@ -488,11 +512,11 @@ const TwoFactorEnabled = () => {
   };
   return (
     <Flex direction="column" gap="2" className="km-account-2fa-disable">
-      <label>{t("account.2fa_enabled")}</label>
-      <div>
+      <div className="flex items-center gap-3">
+        <Badge color="green">{t("account.2fa_enabled")}</Badge>
         <Dialog.Root open={isOpen} onOpenChange={setIsOpen}>
           <Dialog.Trigger>
-            <Button className="ml-2" color="red">
+            <Button size="1" color="red" variant="soft">
               {t("account.disable_2fa")}
             </Button>
           </Dialog.Trigger>
@@ -503,16 +527,16 @@ const TwoFactorEnabled = () => {
             </Dialog.Description>
             <Flex direction="column" gap="2" className="mt-4">
               <label htmlFor="disable_2fa_code">
-                {t("account.2fa_otp_input_prompt")}
+                {t("account.2fa_otp_input_prompt")} (可选)
               </label>
               <TextField.Root
                 id="disable_2fa_code"
                 type="text"
                 inputMode="numeric"
-                maxLength={6}
+                maxLength={8}
                 placeholder="000000"
                 value={code}
-                onChange={(e) => setCode((e.target as HTMLInputElement).value)}
+                onChange={(e) => setCode((e.target as HTMLInputElement).value.replace(/\s+/g, ""))}
               />
             </Flex>
             <Flex gap="2" justify="end" className="mt-4">
@@ -526,6 +550,14 @@ const TwoFactorEnabled = () => {
           </Dialog.Content>
         </Dialog.Root>
       </div>
+      {currentSecret && (
+        <div className="text-xs text-muted-foreground flex items-center gap-1.5 mt-1">
+          <span>当前密钥:</span>
+          <code className="bg-accent px-1.5 py-0.5 rounded font-mono font-semibold select-all">
+            {currentSecret}
+          </code>
+        </div>
+      )}
     </Flex>
   );
 };

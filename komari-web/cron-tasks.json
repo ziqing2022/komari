@@ -1,10 +1,10 @@
 [
   {
     "id": "cron-1",
-    "name": "清理系统临时缓存与日志",
-    "command": "journalctl --vacuum-time=3d && rm -rf /tmp/*.log",
+    "name": "系统健康巡检",
+    "command": "df -h",
     "schedule_type": "preset",
-    "interval_minutes": 1440,
+    "interval_minutes": 30,
     "target_nodes": [
       "all"
     ],
@@ -14,7 +14,7 @@
     "last_result": "Vacuumed 45.2M logs from /var/log/journal. Temporary files cleaned.",
     "next_run_at": "2026-09-22T09:08:39.912Z",
     "created_at": "2026-09-14T13:08:39.912Z",
-    "updated_at": "2026-09-21T09:08:39.912Z"
+    "updated_at": "2026-09-21T14:36:27.670Z"
   },
   {
     "id": "cron-2",

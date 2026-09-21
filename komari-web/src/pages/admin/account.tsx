@@ -468,37 +468,13 @@ const TwoFactorDisabled = () => {
 const TwoFactorEnabled = () => {
   const { t } = useTranslation();
   const [isOpen, setIsOpen] = React.useState(false);
-  const [showQrDialog, setShowQrDialog] = React.useState(false);
   const [saving, setSaving] = React.useState(false);
   const [code, setCode] = React.useState("");
-  const [currentSecret, setCurrentSecret] = React.useState("");
-  const [liveOtp, setLiveOtp] = React.useState<{ current_code?: string; remaining_seconds?: number }>({});
   const { refresh } = useAccount();
-
-  React.useEffect(() => {
-    const fetchInfo = () => {
-      fetch("/api/admin/2fa/info")
-        .then((r) => r.json())
-        .then((res) => {
-          if (res?.data?.two_factor_secret) {
-            setCurrentSecret(res.data.two_factor_secret);
-            setLiveOtp({
-              current_code: res.data.current_code,
-              remaining_seconds: res.data.remaining_seconds
-            });
-          }
-        })
-        .catch(() => {});
-    };
-    fetchInfo();
-    const interval = setInterval(fetchInfo, 3000);
-    return () => clearInterval(interval);
-  }, []);
 
   const disable2fa = () => {
     setSaving(true);
-    const cleanCode = code.replace(/[\s-]/g, "").trim();
-    fetch(`/api/admin/2fa/disable?2fa_code=${encodeURIComponent(cleanCode)}`, {
+    fetch(`/api/admin/2fa/disable?2fa_code=${encodeURIComponent(code)}`, {
       method: "POST",
     })
       .then(async (response) => {
@@ -523,42 +499,8 @@ const TwoFactorEnabled = () => {
   };
   return (
     <Flex direction="column" gap="2" className="km-account-2fa-disable">
-      <div className="flex flex-wrap items-center gap-3">
+      <div className="flex items-center gap-3">
         <Badge color="green">{t("account.2fa_enabled")}</Badge>
-        
-        <Dialog.Root open={showQrDialog} onOpenChange={setShowQrDialog}>
-          <Dialog.Trigger>
-            <Button size="1" variant="soft" color="blue">
-              查看 2FA 二维码与密钥
-            </Button>
-          </Dialog.Trigger>
-          <Dialog.Content className="max-w-sm text-center">
-            <Dialog.Title>扫描绑定身份验证器</Dialog.Title>
-            <Dialog.Description size="2" color="gray" className="mb-3">
-              使用 Google Authenticator、Microsoft Authenticator 等应用扫描二维码
-            </Dialog.Description>
-            <div className="flex justify-center bg-white p-3 rounded-lg w-fit mx-auto border my-2">
-              <img src="/api/admin/2fa/qrcode" alt="2FA QR Code" width={200} height={200} />
-            </div>
-            {currentSecret && (
-              <div className="text-xs text-muted-foreground my-2">
-                <span>手动输入密钥: </span>
-                <code className="bg-accent px-2 py-0.5 rounded font-mono font-bold select-all">
-                  {currentSecret}
-                </code>
-              </div>
-            )}
-            {liveOtp.current_code && (
-              <div className="text-xs bg-amber-500/10 border border-amber-500/20 text-amber-700 dark:text-amber-300 p-2 rounded mt-2">
-                当前实时动态码: <strong className="font-mono font-bold text-sm tracking-wider">{liveOtp.current_code}</strong> ({liveOtp.remaining_seconds}s)
-              </div>
-            )}
-            <Flex justify="end" className="mt-4">
-              <Button onClick={() => setShowQrDialog(false)}>完成</Button>
-            </Flex>
-          </Dialog.Content>
-        </Dialog.Root>
-
         <Dialog.Root open={isOpen} onOpenChange={setIsOpen}>
           <Dialog.Trigger>
             <Button size="1" color="red" variant="soft">
@@ -572,16 +514,13 @@ const TwoFactorEnabled = () => {
             </Dialog.Description>
             <Flex direction="column" gap="2" className="mt-4">
               <label htmlFor="disable_2fa_code">
-                {t("account.2fa_otp_input_prompt")} (输入 6 位验证码以确认解除)
+                {t("account.2fa_otp_input_prompt")}
               </label>
               <TextField.Root
                 id="disable_2fa_code"
-                type="text"
-                inputMode="numeric"
-                maxLength={8}
-                placeholder="000000"
+                placeholder="2FA"
                 value={code}
-                onChange={(e) => setCode((e.target as HTMLInputElement).value.replace(/\s+/g, ""))}
+                onChange={(e) => setCode(e.target.value)}
               />
             </Flex>
             <Flex gap="2" justify="end" className="mt-4">
@@ -595,19 +534,6 @@ const TwoFactorEnabled = () => {
           </Dialog.Content>
         </Dialog.Root>
       </div>
-      {currentSecret && (
-        <div className="text-xs text-muted-foreground flex flex-wrap items-center gap-2 mt-1">
-          <span>当前 2FA 密钥:</span>
-          <code className="bg-accent px-1.5 py-0.5 rounded font-mono font-semibold select-all">
-            {currentSecret}
-          </code>
-          {liveOtp.current_code && (
-            <span className="text-amber-600 dark:text-amber-400 font-mono">
-              [实时动态码: {liveOtp.current_code} ({liveOtp.remaining_seconds}s)]
-            </span>
-          )}
-        </div>
-      )}
     </Flex>
   );
 };

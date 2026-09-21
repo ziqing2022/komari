@@ -111,29 +111,17 @@ const CronContent = () => {
   const LOCAL_STORAGE_KEY = "komari_cron_tasks";
   const LOCAL_STORAGE_INIT_KEY = "komari_cron_initialized";
 
-  // 2FA Info state
-  const [twoFaInfo, setTwoFaInfo] = useState<{ current_code?: string; remaining_seconds?: number; two_factor_secret?: string }>({});
-
-  // Fetch 2FA status and live code
+  // Fetch 2FA status matching exec.tsx and useTerminalPage
   useEffect(() => {
-    const fetch2Fa = () => {
-      fetch("/api/admin/2fa/info")
-        .then((res) => res.json())
-        .then((data) => {
-          if (data?.data) {
-            setTwoFaEnabled(Boolean(data.data["2fa_enabled"]));
-            setTwoFaInfo({
-              current_code: data.data.current_code,
-              remaining_seconds: data.data.remaining_seconds,
-              two_factor_secret: data.data.two_factor_secret,
-            });
-          }
-        })
-        .catch(() => {});
-    };
-    fetch2Fa();
-    const interval = setInterval(fetch2Fa, 3000);
-    return () => clearInterval(interval);
+    fetch("/api/me")
+      .then((res) => res.json())
+      .then((data) => {
+        const user = data?.data || data;
+        setTwoFaEnabled(Boolean(user?.["2fa_enabled"]));
+      })
+      .catch(() => {
+        setTwoFaEnabled(false);
+      });
   }, []);
 
   const getDefaultTasks = (): CronTask[] => [
@@ -263,7 +251,7 @@ const CronContent = () => {
 
     const clean2FaCode = form2FaCode.replace(/[\s-]/g, "").trim();
     if (twoFaEnabled && !clean2FaCode) {
-      toast.error(t("cron.twoFaPrompt", "此敏感操作受 2FA 验证保护，请输入 6 位动态验证码"));
+      toast.error(t("account.otp_empty_error", "请输入动态口令"));
       return;
     }
 
@@ -377,7 +365,7 @@ const CronContent = () => {
     const clean2FaCode = run2FaCode.replace(/[\s-]/g, "").trim();
 
     if (twoFaEnabled && !clean2FaCode) {
-      toast.error(t("cron.twoFaPrompt", "此敏感操作受 2FA 验证保护，请输入 6 位动态验证码"));
+      toast.error(t("account.otp_empty_error", "请输入动态口令"));
       return;
     }
 
@@ -445,7 +433,7 @@ const CronContent = () => {
     const clean2FaCode = delete2FaCode.replace(/[\s-]/g, "").trim();
 
     if (twoFaEnabled && !clean2FaCode) {
-      toast.error(t("cron.twoFaPrompt", "此敏感操作受 2FA 验证保护，请输入 6 位动态验证码"));
+      toast.error(t("account.otp_empty_error", "请输入动态口令"));
       return;
     }
 
@@ -875,49 +863,23 @@ const CronContent = () => {
             </Flex>
 
             {/* 2FA Protection Input */}
-            {twoFaEnabled && (
-              <div className="p-3 bg-amber-500/10 border border-amber-500/20 rounded-md">
-                <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
-                  <Flex align="center" gap="2" className="text-amber-600 dark:text-amber-400 font-medium text-sm">
-                    <ShieldCheck size={16} />
-                    <span>{t("cron.twoFaPrompt", "敏感操作管控：请输入 6 位 2FA 动态验证码")}</span>
-                  </Flex>
-                  {twoFaInfo.current_code && (
-                    <Badge
-                      color="amber"
-                      variant="soft"
-                      className="font-mono text-xs cursor-pointer hover:opacity-80 transition-opacity"
-                      onClick={() => setForm2FaCode(twoFaInfo.current_code || "")}
-                      title="点击填入当前实时动态码"
-                    >
-                      实时码: {twoFaInfo.current_code} ({twoFaInfo.remaining_seconds}s)
-                    </Badge>
-                  )}
-                </div>
-                <Flex align="center" gap="2">
-                  <TextField.Root
-                    type="text"
-                    inputMode="numeric"
-                    maxLength={8}
-                    value={form2FaCode}
-                    onChange={(e) => setForm2FaCode((e.target as HTMLInputElement).value.replace(/\s+/g, ""))}
-                    placeholder="000000"
-                    className="w-36"
-                  />
-                  {twoFaInfo.current_code && (
-                    <Button
-                      size="1"
-                      variant="soft"
-                      color="amber"
-                      type="button"
-                      onClick={() => setForm2FaCode(twoFaInfo.current_code || "")}
-                    >
-                      填入当前动态码
-                    </Button>
-                  )}
-                </Flex>
-              </div>
-            )}
+            {twoFaEnabled ? (
+              <Flex direction="column" gap="1" className="mt-2">
+                <label htmlFor="task_2fa" className="text-sm font-medium">
+                  {t("account.2fa_otp_input_prompt", "请输入您的身份验证应用生成的动态口令")}
+                </label>
+                <TextField.Root
+                  id="task_2fa"
+                  className="w-36"
+                  type="text"
+                  inputMode="numeric"
+                  maxLength={6}
+                  placeholder="2FA"
+                  value={form2FaCode}
+                  onChange={(e) => setForm2FaCode((e.target as HTMLInputElement).value)}
+                />
+              </Flex>
+            ) : null}
           </Flex>
 
           <Flex gap="3" justify="end" className="mt-6">
@@ -939,48 +901,23 @@ const CronContent = () => {
             确定要立即在目标节点上触发任务「<span className="font-semibold text-foreground">{taskToRun?.name}</span>」吗？
           </Dialog.Description>
 
-          {twoFaEnabled && (
-            <div className="p-3 bg-amber-500/10 border border-amber-500/20 rounded-md mb-4">
-              <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
-                <label className="text-sm font-semibold block text-amber-600 dark:text-amber-400">
-                  {t("cron.twoFaPrompt", "敏感操作管控：请输入 6 位 2FA 动态验证码")}
-                </label>
-                {twoFaInfo.current_code && (
-                  <Badge
-                    color="amber"
-                    variant="soft"
-                    className="font-mono text-xs cursor-pointer hover:opacity-80 transition-opacity"
-                    onClick={() => setRun2FaCode(twoFaInfo.current_code || "")}
-                    title="点击填入当前实时动态码"
-                  >
-                    实时码: {twoFaInfo.current_code} ({twoFaInfo.remaining_seconds}s)
-                  </Badge>
-                )}
-              </div>
-              <Flex align="center" gap="2">
-                <TextField.Root
-                  type="text"
-                  inputMode="numeric"
-                  maxLength={8}
-                  value={run2FaCode}
-                  onChange={(e) => setRun2FaCode((e.target as HTMLInputElement).value.replace(/\s+/g, ""))}
-                  placeholder="000000"
-                  className="w-36"
-                />
-                {twoFaInfo.current_code && (
-                  <Button
-                    size="1"
-                    variant="soft"
-                    color="amber"
-                    type="button"
-                    onClick={() => setRun2FaCode(twoFaInfo.current_code || "")}
-                  >
-                    填入当前动态码
-                  </Button>
-                )}
-              </Flex>
-            </div>
-          )}
+          {twoFaEnabled ? (
+            <Flex direction="column" gap="1" className="mb-4">
+              <label htmlFor="run_2fa" className="text-sm font-medium">
+                {t("account.2fa_otp_input_prompt", "请输入您的身份验证应用生成的动态口令")}
+              </label>
+              <TextField.Root
+                id="run_2fa"
+                className="w-36"
+                type="text"
+                inputMode="numeric"
+                maxLength={6}
+                placeholder="2FA"
+                value={run2FaCode}
+                onChange={(e) => setRun2FaCode((e.target as HTMLInputElement).value)}
+              />
+            </Flex>
+          ) : null}
 
           <Flex gap="3" justify="end">
             <Button variant="soft" color="gray" onClick={() => setRunDialogOpen(false)}>
@@ -1008,48 +945,23 @@ const CronContent = () => {
             {t("cron.deleteConfirm", "确定要删除该定时任务吗？此操作无法撤销。")}
           </Dialog.Description>
 
-          {twoFaEnabled && (
-            <div className="p-3 bg-amber-500/10 border border-amber-500/20 rounded-md mb-4">
-              <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
-                <label className="text-sm font-semibold block text-amber-600 dark:text-amber-400">
-                  {t("cron.twoFaPrompt", "敏感操作管控：请输入 6 位 2FA 动态验证码")}
-                </label>
-                {twoFaInfo.current_code && (
-                  <Badge
-                    color="amber"
-                    variant="soft"
-                    className="font-mono text-xs cursor-pointer hover:opacity-80 transition-opacity"
-                    onClick={() => setDelete2FaCode(twoFaInfo.current_code || "")}
-                    title="点击填入当前实时动态码"
-                  >
-                    实时码: {twoFaInfo.current_code} ({twoFaInfo.remaining_seconds}s)
-                  </Badge>
-                )}
-              </div>
-              <Flex align="center" gap="2">
-                <TextField.Root
-                  type="text"
-                  inputMode="numeric"
-                  maxLength={8}
-                  value={delete2FaCode}
-                  onChange={(e) => setDelete2FaCode((e.target as HTMLInputElement).value.replace(/\s+/g, ""))}
-                  placeholder="000000"
-                  className="w-36"
-                />
-                {twoFaInfo.current_code && (
-                  <Button
-                    size="1"
-                    variant="soft"
-                    color="amber"
-                    type="button"
-                    onClick={() => setDelete2FaCode(twoFaInfo.current_code || "")}
-                  >
-                    填入当前动态码
-                  </Button>
-                )}
-              </Flex>
-            </div>
-          )}
+          {twoFaEnabled ? (
+            <Flex direction="column" gap="1" className="mb-4">
+              <label htmlFor="delete_2fa" className="text-sm font-medium">
+                {t("account.2fa_otp_input_prompt", "请输入您的身份验证应用生成的动态口令")}
+              </label>
+              <TextField.Root
+                id="delete_2fa"
+                className="w-36"
+                type="text"
+                inputMode="numeric"
+                maxLength={6}
+                placeholder="2FA"
+                value={delete2FaCode}
+                onChange={(e) => setDelete2FaCode((e.target as HTMLInputElement).value)}
+              />
+            </Flex>
+          ) : null}
 
           <Flex gap="3" justify="end">
             <Button variant="soft" color="gray" onClick={() => setDeleteDialogOpen(false)}>

@@ -4,6 +4,6 @@
   "role": "admin",
   "logged_in": true,
   "created_at": "2024-01-01T00:00:00Z",
-  "2fa_enabled": true,
-  "two_factor": "JBSWY3DPEHPK3PXP"
+  "2fa_enabled": false,
+  "two_factor": ""
 }

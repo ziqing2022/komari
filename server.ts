@@ -33,8 +33,8 @@ function loadUserAccount(): UserAccount {
     role: 'admin',
     logged_in: true,
     created_at: '2024-01-01T00:00:00Z',
-    "2fa_enabled": true,
-    two_factor: 'JBSWY3DPEHPK3PXP',
+    "2fa_enabled": false,
+    two_factor: '',
     sso_type: '',
     sso_id: ''
   };
@@ -134,35 +134,27 @@ function get2FACodeFromReq(req: express.Request): string {
   return '';
 }
 
-// Middleware: RequireSensitive2FA (equivalent to Go RequireSensitive2FA)
+// Middleware: RequireSensitive2FA (equivalent to Go RequireSensitive2FA in web/api/AuthSensitive.go)
 function requireSensitive2FA(req: express.Request, res: express.Response, next: express.NextFunction) {
   const account = loadUserAccount();
   if (!account['2fa_enabled'] || !account.two_factor) {
-    // 2FA is not enabled on user account, allow operation
+    // 2FA is not enabled on user account, allow operation directly
     return next();
   }
 
   const code = get2FACodeFromReq(req);
-  const logLine = `[${new Date().toISOString()}] ${req.method} ${req.originalUrl || req.url} | code="${code}" | 2fa_enabled=${account['2fa_enabled']} | secret="${account.two_factor}" | expected_current="${account.two_factor ? generateTOTP(account.two_factor) : ''}"\n`;
-  try {
-    fs.appendFileSync('/tmp/2fa_requests.log', logLine);
-  } catch (e) {}
-  console.log(logLine);
-
   if (!code) {
     return res.status(401).json({
       status: 'error',
-      message: '此敏感操作需要 2FA 动态验证码 (2FA code is required)'
+      message: '2FA code is required'
     });
   }
 
   const isValid = verifyTOTP(code, account.two_factor);
-  console.log(`[2FA Validation] Received Code: "${code}", Expected TOTP: "${generateTOTP(account.two_factor)}", Valid: ${isValid}`);
-
   if (!isValid) {
     return res.status(401).json({
       status: 'error',
-      message: '2FA 验证码错误 (Invalid 2FA code)'
+      message: 'Invalid 2FA code'
     });
   }
 
@@ -497,17 +489,12 @@ app.get('/api/admin/2fa/generate', async (_req, res) => {
 
 app.get('/api/admin/2fa/info', (_req, res) => {
   const account = loadUserAccount();
-  const activeSecret = account['2fa_enabled'] ? (account.two_factor || '') : (pending2FASecret || '');
-  const currentCode = activeSecret ? generateTOTP(activeSecret) : '';
-  const remainingSeconds = 30 - (Math.floor(Date.now() / 1000) % 30);
   res.json({
     status: 'success',
     data: {
       "2fa_enabled": Boolean(account['2fa_enabled']),
       two_factor_secret: account['2fa_enabled'] ? (account.two_factor || '') : '',
-      pending_secret: pending2FASecret || '',
-      current_code: currentCode,
-      remaining_seconds: remainingSeconds
+      pending_secret: pending2FASecret || ''
     }
   });
 });

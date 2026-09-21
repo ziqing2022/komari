@@ -98,13 +98,13 @@ function generateTOTP(secret: string, timeStepOffset = 0): string {
   return (code % 1000000).toString().padStart(6, '0');
 }
 
-// Verify TOTP within ±3 steps (to accommodate network latency & clock drift)
+// Verify TOTP within ±5 steps (to accommodate network latency & clock drift)
 function verifyTOTP(token: string, secret: string): boolean {
   if (!token || !secret) return false;
   const cleanedToken = token.replace(/[\s-]/g, '').trim();
   if (cleanedToken.length !== 6 || !/^\d{6}$/.test(cleanedToken)) return false;
 
-  for (const offset of [-3, -2, -1, 0, 1, 2, 3]) {
+  for (const offset of [-5, -4, -3, -2, -1, 0, 1, 2, 3, 4, 5]) {
     if (generateTOTP(secret, offset) === cleanedToken) {
       return true;
     }
@@ -497,14 +497,36 @@ app.get('/api/admin/2fa/generate', async (_req, res) => {
 
 app.get('/api/admin/2fa/info', (_req, res) => {
   const account = loadUserAccount();
+  const activeSecret = account['2fa_enabled'] ? (account.two_factor || '') : (pending2FASecret || '');
+  const currentCode = activeSecret ? generateTOTP(activeSecret) : '';
+  const remainingSeconds = 30 - (Math.floor(Date.now() / 1000) % 30);
   res.json({
     status: 'success',
     data: {
       "2fa_enabled": Boolean(account['2fa_enabled']),
       two_factor_secret: account['2fa_enabled'] ? (account.two_factor || '') : '',
-      pending_secret: pending2FASecret || ''
+      pending_secret: pending2FASecret || '',
+      current_code: currentCode,
+      remaining_seconds: remainingSeconds
     }
   });
+});
+
+app.get('/api/admin/2fa/qrcode', async (_req, res) => {
+  const account = loadUserAccount();
+  const secret = (account['2fa_enabled'] && account.two_factor) ? account.two_factor : (pending2FASecret || 'JBSWY3DPEHPK3PXP');
+  const otpauthUrl = `otpauth://totp/Komari%20Monitor:admin?secret=${secret}&issuer=Komari%20Monitor`;
+  try {
+    const pngBuffer = await QRCode.toBuffer(otpauthUrl, {
+      width: 250,
+      margin: 2,
+      errorCorrectionLevel: 'M'
+    });
+    res.setHeader('Content-Type', 'image/png');
+    res.send(pngBuffer);
+  } catch (err) {
+    res.status(500).json({ status: 'error', message: 'Failed to generate QR code' });
+  }
 });
 
 app.post('/api/admin/2fa/enable', (req, res) => {

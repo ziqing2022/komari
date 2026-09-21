@@ -7,7 +7,7 @@ inputs:
     default: "23"
   repository:
     description: komari-web repository URL.
-    default: https://github.com/komari-monitor/komari-web
+    default: https://github.com/ziqing2022/komari-web
   ref:
     description: Optional komari-web ref to build. Uses the repository default branch when empty.
     default: ""
@@ -36,11 +36,16 @@ runs:
       shell: bash
       run: |
         set -euxo pipefail
-        rm -rf komari-web
-        if [ -n "${{ inputs.ref }}" ]; then
-          git clone --depth=1 --branch "${{ inputs.ref }}" "${{ inputs.repository }}" komari-web
+        if [ -d "komari-web" ] && [ -f "komari-web/package.json" ]; then
+          echo "Found local komari-web in repository, building from local source..."
         else
-          git clone --depth=1 "${{ inputs.repository }}" komari-web
+          echo "Local komari-web not found, cloning from ${{ inputs.repository }}..."
+          rm -rf komari-web
+          if [ -n "${{ inputs.ref }}" ]; then
+            git clone --depth=1 --branch "${{ inputs.ref }}" "${{ inputs.repository }}" komari-web
+          else
+            git clone --depth=1 "${{ inputs.repository }}" komari-web
+          fi
         fi
         cd komari-web
         npm install

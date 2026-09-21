@@ -28,7 +28,7 @@ import (
 	"log"
 	"time"
 
-	jsruntime "github.com/ziqing2022/komari/pkg/jsruntime"
+	jsruntime "github.com/komari-monitor/komari/pkg/jsruntime"
 )
 
 func main() {
@@ -142,7 +142,7 @@ runtime, err := jsruntime.New(`
 import (
 	"github.com/dop251/goja"
 	"github.com/dop251/goja_nodejs/require"
-	jsruntime "github.com/ziqing2022/komari/pkg/jsruntime"
+	jsruntime "github.com/komari-monitor/komari/pkg/jsruntime"
 )
 
 runtime, err := jsruntime.New(`

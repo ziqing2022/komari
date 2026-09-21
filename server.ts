@@ -356,7 +356,9 @@ interface CronTaskItem {
   updated_at: string;
 }
 
-let cronTasksList: CronTaskItem[] = [
+const cronFilePath = path.join(process.cwd(), 'komari-web', 'cron-tasks.json');
+
+const initialCronTasks: CronTaskItem[] = [
   {
     id: 'cron-1',
     name: '清理系统临时缓存与日志',
@@ -389,8 +391,44 @@ let cronTasksList: CronTaskItem[] = [
   }
 ];
 
+function loadCronTasks(): CronTaskItem[] {
+  try {
+    if (fs.existsSync(cronFilePath)) {
+      const content = fs.readFileSync(cronFilePath, 'utf-8');
+      const data = JSON.parse(content);
+      if (Array.isArray(data)) {
+        return data;
+      }
+    }
+  } catch (e) {
+    console.error('Error reading cron tasks file:', e);
+  }
+  // Initialize file with default tasks if not exists
+  saveCronTasks(initialCronTasks);
+  return [...initialCronTasks];
+}
+
+function saveCronTasks(tasks: CronTaskItem[]) {
+  try {
+    fs.writeFileSync(cronFilePath, JSON.stringify(tasks, null, 2), 'utf-8');
+  } catch (e) {
+    console.error('Error writing cron tasks file:', e);
+  }
+}
+
+let cronTasksList: CronTaskItem[] = loadCronTasks();
+
+function matchTaskId(task: CronTaskItem, queryId: string): boolean {
+  if (!queryId) return false;
+  if (task.id === queryId) return true;
+  const num1 = task.id.replace(/^(cron|task)-/, '');
+  const num2 = queryId.replace(/^(cron|task)-/, '');
+  return num1 === num2 && num1 !== '';
+}
+
 // Cron API routes
 app.get('/api/admin/cron', (_req, res) => {
+  cronTasksList = loadCronTasks();
   res.json({
     status: 'success',
     tasks: cronTasksList
@@ -419,43 +457,48 @@ app.post('/api/admin/cron', (req, res) => {
     updated_at: new Date().toISOString(),
   };
   cronTasksList.unshift(newTask);
+  saveCronTasks(cronTasksList);
   res.json({ status: 'success', task: newTask });
 });
 
 app.put('/api/admin/cron/:id', (req, res) => {
   const { id } = req.params;
-  const idx = cronTasksList.findIndex((t) => t.id === id);
+  const idx = cronTasksList.findIndex((t) => matchTaskId(t, id));
   if (idx === -1) {
     return res.status(404).json({ status: 'error', message: 'Task not found' });
   }
   cronTasksList[idx] = {
     ...cronTasksList[idx],
     ...req.body,
+    id: cronTasksList[idx].id, // preserve existing id
     updated_at: new Date().toISOString()
   };
+  saveCronTasks(cronTasksList);
   res.json({ status: 'success', task: cronTasksList[idx] });
 });
 
 app.delete('/api/admin/cron/:id', (req, res) => {
   const { id } = req.params;
-  cronTasksList = cronTasksList.filter((t) => t.id !== id);
+  cronTasksList = cronTasksList.filter((t) => !matchTaskId(t, id));
+  saveCronTasks(cronTasksList);
   res.json({ status: 'success' });
 });
 
 app.post('/api/admin/cron/:id/toggle', (req, res) => {
   const { id } = req.params;
-  const task = cronTasksList.find((t) => t.id === id);
+  const task = cronTasksList.find((t) => matchTaskId(t, id));
   if (!task) {
     return res.status(404).json({ status: 'error', message: 'Task not found' });
   }
   task.enabled = req.body.enabled !== undefined ? req.body.enabled : !task.enabled;
   task.updated_at = new Date().toISOString();
+  saveCronTasks(cronTasksList);
   res.json({ status: 'success', enabled: task.enabled });
 });
 
 app.post('/api/admin/cron/:id/run', (req, res) => {
   const { id } = req.params;
-  const task = cronTasksList.find((t) => t.id === id);
+  const task = cronTasksList.find((t) => matchTaskId(t, id));
   if (!task) {
     return res.status(404).json({ status: 'error', message: 'Task not found' });
   }
@@ -463,12 +506,13 @@ app.post('/api/admin/cron/:id/run', (req, res) => {
   task.last_exit_code = 0;
   task.last_result = `[Manual Trigger ${new Date().toLocaleTimeString()}] Executed successfully on target nodes.`;
   task.updated_at = new Date().toISOString();
+  saveCronTasks(cronTasksList);
   res.json({ status: 'success', task });
 });
 
 app.get('/api/admin/cron/:id/logs', (req, res) => {
   const { id } = req.params;
-  const task = cronTasksList.find((t) => t.id === id);
+  const task = cronTasksList.find((t) => matchTaskId(t, id));
   if (!task) {
     return res.status(404).json({ status: 'error', message: 'Task not found' });
   }

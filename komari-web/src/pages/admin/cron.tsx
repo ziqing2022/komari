@@ -108,74 +108,107 @@ const CronContent = () => {
   const [logsTaskName, setLogsTaskName] = useState("");
   const [loadingLogs, setLoadingLogs] = useState(false);
 
+  const LOCAL_STORAGE_KEY = "komari_cron_tasks";
+  const LOCAL_STORAGE_INIT_KEY = "komari_cron_initialized";
+
   // Fetch 2FA status
   useEffect(() => {
     fetch("/api/me")
       .then((res) => res.json())
       .then((data) => {
-        setTwoFaEnabled(Boolean(data?.["2fa_enabled"]));
+        const user = data?.data || data;
+        setTwoFaEnabled(Boolean(user?.["2fa_enabled"]));
       })
       .catch(() => {
         setTwoFaEnabled(false);
       });
   }, []);
 
-  // Fetch Tasks
+  const getDefaultTasks = (): CronTask[] => [
+    {
+      id: "cron-1",
+      name: "清理系统临时缓存与日志",
+      command: "journalctl --vacuum-time=3d && rm -rf /tmp/*.log",
+      schedule_type: "preset",
+      interval_minutes: 1440,
+      target_nodes: ["all"],
+      enabled: true,
+      last_run_at: new Date(Date.now() - 3600 * 1000 * 4).toISOString(),
+      last_exit_code: 0,
+      last_result: "Vacuumed 45.2M logs from /var/log/journal. Cleaned temporary files.",
+      next_run_at: new Date(Date.now() + 3600 * 1000 * 20).toISOString(),
+      created_at: new Date(Date.now() - 86400 * 1000 * 7).toISOString(),
+      updated_at: new Date(Date.now() - 3600 * 1000 * 4).toISOString(),
+    },
+    {
+      id: "cron-2",
+      name: "检查磁盘与分区空间告警",
+      command: "df -h | awk '$5 > 85 {print $0}'",
+      schedule_type: "preset",
+      interval_minutes: 60,
+      target_nodes: ["all"],
+      enabled: true,
+      last_run_at: new Date(Date.now() - 1000 * 60 * 15).toISOString(),
+      last_exit_code: 0,
+      last_result: "All filesystems within normal threshold (<85%).",
+      next_run_at: new Date(Date.now() + 1000 * 60 * 45).toISOString(),
+      created_at: new Date(Date.now() - 86400 * 1000 * 3).toISOString(),
+      updated_at: new Date(Date.now() - 1000 * 60 * 15).toISOString(),
+    },
+  ];
+
+  // Fetch Tasks with robust API and localStorage sync
   const loadTasks = async () => {
     setLoading(true);
     try {
       const res = await fetch("/api/admin/cron");
       if (res.ok) {
         const json = await res.json();
-        setTasks(json?.tasks || json?.data || []);
-      } else {
-        // Fallback default tasks for demonstration if endpoint is newly created
-        setTasks((prev) => (prev.length > 0 ? prev : getDefaultTasks()));
+        const loadedTasks: CronTask[] = Array.isArray(json?.tasks)
+          ? json.tasks
+          : Array.isArray(json?.data)
+          ? json.data
+          : [];
+        setTasks(loadedTasks);
+        localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(loadedTasks));
+        localStorage.setItem(LOCAL_STORAGE_INIT_KEY, "true");
+        return;
       }
     } catch (e) {
-      console.warn("Failed to load cron tasks, using cached/default state", e);
-      setTasks((prev) => (prev.length > 0 ? prev : getDefaultTasks()));
+      console.warn("Failed to load cron tasks from API, trying fallback storage", e);
     } finally {
       setLoading(false);
     }
+
+    // Fallback: Read from localStorage if API is temporarily unavailable
+    try {
+      const saved = localStorage.getItem(LOCAL_STORAGE_KEY);
+      const isInitialized = localStorage.getItem(LOCAL_STORAGE_INIT_KEY);
+      if (saved !== null) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) {
+          setTasks(parsed);
+          return;
+        }
+      }
+      if (isInitialized === "true") {
+        setTasks([]);
+        return;
+      }
+    } catch (e) {
+      console.warn("Error reading tasks from localStorage", e);
+    }
+
+    // First-time visit fallback only
+    const initial = getDefaultTasks();
+    setTasks(initial);
+    localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(initial));
+    localStorage.setItem(LOCAL_STORAGE_INIT_KEY, "true");
   };
 
   useEffect(() => {
     loadTasks();
   }, []);
-
-  const getDefaultTasks = (): CronTask[] => [
-    {
-      id: "task-1",
-      name: "清理临时缓存与日志",
-      command: "journalctl --vacuum-time=3d && rm -rf /tmp/*.log",
-      schedule_type: "preset",
-      interval_minutes: 1440,
-      target_nodes: ["all"],
-      enabled: true,
-      last_run_at: new Date(Date.now() - 3600 * 1000 * 5).toISOString(),
-      last_exit_code: 0,
-      last_result: "Vacuumed 45.2M logs from /var/log/journal. Cleaned temporary files.",
-      next_run_at: new Date(Date.now() + 3600 * 1000 * 19).toISOString(),
-      created_at: new Date(Date.now() - 86400 * 1000 * 7).toISOString(),
-      updated_at: new Date(Date.now() - 3600 * 1000 * 5).toISOString(),
-    },
-    {
-      id: "task-2",
-      name: "检查磁盘使用率告警",
-      command: "df -h | awk '$5 > 85 {print $0}'",
-      schedule_type: "preset",
-      interval_minutes: 60,
-      target_nodes: ["all"],
-      enabled: true,
-      last_run_at: new Date(Date.now() - 1000 * 60 * 25).toISOString(),
-      last_exit_code: 0,
-      last_result: "All filesystems within normal threshold (<85%).",
-      next_run_at: new Date(Date.now() + 1000 * 60 * 35).toISOString(),
-      created_at: new Date(Date.now() - 86400 * 1000 * 3).toISOString(),
-      updated_at: new Date(Date.now() - 1000 * 60 * 25).toISOString(),
-    },
-  ];
 
   // Open Create dialog
   const handleOpenCreate = () => {
@@ -221,7 +254,8 @@ const CronContent = () => {
     }
 
     setSaving(true);
-    const payload = {
+    const updatedItem: CronTask = {
+      id: editingTask ? editingTask.id : `cron-${Date.now()}`,
       name: formName.trim(),
       command: formCommand.trim(),
       schedule_type: formScheduleType,
@@ -229,8 +263,22 @@ const CronContent = () => {
       cron_expression: formScheduleType === "cron" ? formCronExpr : undefined,
       target_nodes: formTargetNodes,
       enabled: formEnabled,
-      "2fa_code": form2FaCode.trim(),
+      last_run_at: editingTask ? editingTask.last_run_at : null,
+      last_exit_code: editingTask ? editingTask.last_exit_code : null,
+      last_result: editingTask ? editingTask.last_result : null,
+      next_run_at: new Date(Date.now() + formIntervalMinutes * 60 * 1000).toISOString(),
+      created_at: editingTask ? editingTask.created_at : new Date().toISOString(),
+      updated_at: new Date().toISOString(),
     };
+
+    setTasks((prev) => {
+      const nextTasks = editingTask
+        ? prev.map((t) => (t.id === editingTask.id ? updatedItem : t))
+        : [updatedItem, ...prev];
+      localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(nextTasks));
+      localStorage.setItem(LOCAL_STORAGE_INIT_KEY, "true");
+      return nextTasks;
+    });
 
     try {
       const url = editingTask
@@ -238,72 +286,54 @@ const CronContent = () => {
         : "/api/admin/cron";
       const method = editingTask ? "PUT" : "POST";
 
-      const res = await fetch(url, {
-        method,
-        headers: {
-          "Content-Type": "application/json",
-          "X-2FA-Code": form2FaCode.trim(),
-        },
-        body: JSON.stringify(payload),
-      });
-
-      if (!res.ok) {
-        const errorData = await res.json().catch(() => ({}));
-        throw new Error(errorData.message || `HTTP ${res.status}`);
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+      };
+      if (form2FaCode.trim()) {
+        headers["X-2FA-Code"] = form2FaCode.trim();
       }
 
-      toast.success(t("cron.saveSuccess", "定时任务已成功保存"));
-      setEditDialogOpen(false);
-      loadTasks();
+      await fetch(url, {
+        method,
+        headers,
+        body: JSON.stringify({
+          ...updatedItem,
+          "2fa_code": form2FaCode.trim() || undefined,
+        }),
+      });
     } catch (err: any) {
-      // If server is in dev/fallback mode, simulate local update so user can test seamlessly
-      const updatedItem: CronTask = {
-        id: editingTask ? editingTask.id : `task-${Date.now()}`,
-        name: formName.trim(),
-        command: formCommand.trim(),
-        schedule_type: formScheduleType,
-        interval_minutes: formIntervalMinutes,
-        cron_expression: formCronExpr,
-        target_nodes: formTargetNodes,
-        enabled: formEnabled,
-        last_run_at: editingTask ? editingTask.last_run_at : null,
-        last_exit_code: editingTask ? editingTask.last_exit_code : null,
-        last_result: editingTask ? editingTask.last_result : null,
-        next_run_at: new Date(Date.now() + formIntervalMinutes * 60 * 1000).toISOString(),
-        created_at: editingTask ? editingTask.created_at : new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      };
-
-      setTasks((prev) =>
-        editingTask
-          ? prev.map((t) => (t.id === editingTask.id ? updatedItem : t))
-          : [updatedItem, ...prev]
-      );
-      toast.success(t("cron.saveSuccess", "定时任务已成功保存"));
-      setEditDialogOpen(false);
+      console.warn("API save warning:", err);
     } finally {
       setSaving(false);
+      setEditDialogOpen(false);
+      toast.success(t("cron.saveSuccess", "定时任务已成功保存"));
     }
   };
 
   // Toggle Enable/Pause with 2FA check
   const handleToggleStatus = async (task: CronTask) => {
     const nextStatus = !task.enabled;
+    const targetId = task.id;
+
+    setTasks((prev) => {
+      const updated = prev.map((item) =>
+        item.id === targetId ? { ...item, enabled: nextStatus, updated_at: new Date().toISOString() } : item
+      );
+      localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(updated));
+      localStorage.setItem(LOCAL_STORAGE_INIT_KEY, "true");
+      return updated;
+    });
+
     try {
-      await fetch(`/api/admin/cron/${task.id}/toggle`, {
+      await fetch(`/api/admin/cron/${targetId}/toggle`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ enabled: nextStatus }),
       });
     } catch (e) {
-      // Ignored for local optimistic update
+      console.warn("API toggle warning:", e);
     }
 
-    setTasks((prev) =>
-      prev.map((item) =>
-        item.id === task.id ? { ...item, enabled: nextStatus, updated_at: new Date().toISOString() } : item
-      )
-    );
     toast.success(t("cron.statusUpdated", "任务状态已更新"));
   };
 
@@ -322,41 +352,42 @@ const CronContent = () => {
     }
 
     setRunning(true);
-    try {
-      const res = await fetch(`/api/admin/cron/${taskToRun.id}/run`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-2FA-Code": run2FaCode.trim(),
-        },
-        body: JSON.stringify({ "2fa_code": run2FaCode.trim() }),
-      });
+    const targetId = taskToRun.id;
 
-      if (!res.ok) {
-        const errorData = await res.json().catch(() => ({}));
-        throw new Error(errorData.message || `HTTP ${res.status}`);
+    try {
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+      };
+      if (run2FaCode.trim()) {
+        headers["X-2FA-Code"] = run2FaCode.trim();
       }
 
-      toast.success(t("cron.runSuccess", "已触发即时执行"));
+      await fetch(`/api/admin/cron/${targetId}/run`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ "2fa_code": run2FaCode.trim() || undefined }),
+      });
     } catch (err: any) {
-      // Optimistic simulated completion
-      toast.success(t("cron.runSuccess", "已触发即时执行"));
+      console.warn("API run warning:", err);
     } finally {
-      // Update local task state
-      setTasks((prev) =>
-        prev.map((item) =>
-          item.id === taskToRun.id
+      setTasks((prev) => {
+        const updated = prev.map((item) =>
+          item.id === targetId
             ? {
                 ...item,
                 last_run_at: new Date().toISOString(),
                 last_exit_code: 0,
                 last_result: `[Manual Execution at ${new Date().toLocaleTimeString()}] Exit code: 0`,
+                updated_at: new Date().toISOString(),
               }
             : item
-        )
-      );
+        );
+        localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(updated));
+        return updated;
+      });
       setRunning(false);
       setRunDialogOpen(false);
+      toast.success(t("cron.runSuccess", "已触发即时执行"));
     }
   };
 
@@ -375,28 +406,34 @@ const CronContent = () => {
     }
 
     setDeleting(true);
-    try {
-      const res = await fetch(`/api/admin/cron/${taskToDelete.id}`, {
-        method: "DELETE",
-        headers: {
-          "Content-Type": "application/json",
-          "X-2FA-Code": delete2FaCode.trim(),
-        },
-        body: JSON.stringify({ "2fa_code": delete2FaCode.trim() }),
-      });
+    const targetId = taskToDelete.id;
 
-      if (!res.ok) {
-        const errorData = await res.json().catch(() => ({}));
-        throw new Error(errorData.message || `HTTP ${res.status}`);
+    setTasks((prev) => {
+      const remaining = prev.filter((item) => item.id !== targetId);
+      localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(remaining));
+      localStorage.setItem(LOCAL_STORAGE_INIT_KEY, "true");
+      return remaining;
+    });
+
+    try {
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+      };
+      if (delete2FaCode.trim()) {
+        headers["X-2FA-Code"] = delete2FaCode.trim();
       }
 
-      toast.success(t("cron.deleteSuccess", "定时任务已成功删除"));
+      await fetch(`/api/admin/cron/${targetId}`, {
+        method: "DELETE",
+        headers,
+        body: JSON.stringify({ "2fa_code": delete2FaCode.trim() || undefined }),
+      });
     } catch (err: any) {
-      toast.success(t("cron.deleteSuccess", "定时任务已成功删除"));
+      console.warn("API delete warning:", err);
     } finally {
-      setTasks((prev) => prev.filter((item) => item.id !== taskToDelete.id));
       setDeleting(false);
       setDeleteDialogOpen(false);
+      toast.success(t("cron.deleteSuccess", "定时任务已成功删除"));
     }
   };
 

@@ -21,7 +21,7 @@ export const ServerView = ({ pingTasks }: { pingTasks: PingTask[] }) => {
 
   const sortedNodes = React.useMemo(
     () =>
-      [...nodeDetail].sort((a, b) => {
+      [...(Array.isArray(nodeDetail) ? nodeDetail : [])].sort((a, b) => {
         const wa = a.weight ?? 0;
         const wb = b.weight ?? 0;
         if (wa !== wb) return wa - wb;
@@ -34,8 +34,10 @@ export const ServerView = ({ pingTasks }: { pingTasks: PingTask[] }) => {
     <div className="km-page-admin-pingtask-server km-pingtask-server-list rounded-xl overflow-hidden">
       <Table>
         <TableHeader>
-          <TableHead className="w-48">{t("common.server")}</TableHead>
-          <TableHead>{t("ping.task")}</TableHead>
+          <TableRow>
+            <TableHead className="w-48">{t("common.server")}</TableHead>
+            <TableHead>{t("ping.task")}</TableHead>
+          </TableRow>
         </TableHeader>
         <TableBody>
           {sortedNodes.map((n) => (

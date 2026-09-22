@@ -44,8 +44,13 @@ export const NodeDetailsProvider: React.FC<{ children: React.ReactNode }> = ({ c
   const refresh = () => {
     fetch("/api/admin/client/list")
       .then((response) => response.json())
-      .then((data: NodeDetail[]) => {
-        setNodeDetail(data);
+      .then((data: unknown) => {
+        const list = Array.isArray(data)
+          ? data
+          : Array.isArray((data as any)?.data)
+          ? (data as any).data
+          : [];
+        setNodeDetail(list);
         setIsLoading(false);
       })
       .catch((error) => {

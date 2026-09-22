@@ -289,7 +289,7 @@ const InnerLayout = () => {
                     {ssoInfo?.isBound ? t("account_settings.sso_account_bound", { name: displayName }) : t("account_settings.sso_account")}
                   </label>
                   <div className="p-4 bg-[var(--accent-2)] rounded-lg">
-                    <p>
+                    <div>
                       {ssoInfo?.isBound ? (
                         <div className="flex items-center gap-2">
                           <Badge color="green">
@@ -305,7 +305,7 @@ const InnerLayout = () => {
                           {t("account_settings.sso_not_bound")}
                         </div>
                       )}
-                    </p>
+                    </div>
                   </div>
                   <div>
                     {ssoInfo?.isBound ? (

@@ -548,10 +548,8 @@ app.post('/api/admin/2fa/disable', (req, res) => {
 
 // 4. Admin Clients & Ping Endpoints
 app.get('/api/admin/client/list', (_req, res) => {
-  res.json({
-    status: 'success',
-    data: Object.values(initialNodes)
-  });
+  // Go jsonRpc.Bind("admin:listClients", jsonRpc.WithRaw()) returns raw Client[] array
+  res.json(Object.values(initialNodes));
 });
 
 app.get('/api/admin/ping', (_req, res) => {
@@ -568,6 +566,108 @@ app.get('/api/admin/database/size', (_req, res) => {
       size: '24.6 MB',
       records: 184500
     }
+  });
+});
+
+// App Settings In-Memory Store
+let appSettings: Record<string, any> = {
+  sitename: "Komari",
+  description: "A simple server monitor tool.",
+  cors_origin_check_enabled: false,
+  cors_allowed_origins: "",
+  ws_origin_check_enabled: false,
+  ws_allowed_origins: "",
+  theme: "default",
+  private_site: false,
+  api_key: "",
+  auto_discovery_key: "",
+  script_domain: "",
+  send_ip_addr_to_guest: false,
+  visitor_audit_enabled: false,
+  ssrf_protection_enabled: false,
+  eula_accepted: true,
+  base_scripts_url: "",
+  geo_ip_enabled: true,
+  geo_ip_provider: "ipinfo",
+  o_auth_enabled: false,
+  o_auth_provider: "github",
+  disable_password_login: false,
+  custom_head: "",
+  custom_body: "",
+  notification_enabled: true,
+  notification_method: "none",
+  notification_template: "{{emoji}}{{emoji}}{{emoji}}\nEvent: {{event}}\nClients: {{client}}\nMessage: {{message}}\nTime: {{time}}",
+  expire_notification_enabled: true,
+  expire_notification_lead_days: 7,
+  login_notification: true,
+  traffic_limit_percentage: 80.0,
+  CreatedAt: "2024-01-01T00:00:00Z",
+  UpdatedAt: new Date().toISOString()
+};
+
+app.get('/api/admin/settings', (_req, res) => {
+  res.json({
+    status: 'success',
+    data: appSettings
+  });
+});
+
+app.post('/api/admin/settings', (req, res) => {
+  if (req.body && typeof req.body === 'object') {
+    appSettings = {
+      ...appSettings,
+      ...req.body,
+      UpdatedAt: new Date().toISOString()
+    };
+  }
+  res.json({
+    status: 'success',
+    data: null,
+    message: 'Settings saved successfully'
+  });
+});
+
+app.get('/api/admin/settings/oidc', (req, res) => {
+  const provider = req.query.provider as string;
+  if (provider) {
+    return res.json({
+      status: 'success',
+      data: {
+        addition: JSON.stringify({
+          client_id: '',
+          client_secret: '',
+          auth_url: '',
+          token_url: '',
+          user_info_url: ''
+        })
+      }
+    });
+  }
+  res.json({
+    status: 'success',
+    data: {
+      github: {
+        name: 'GitHub',
+        fields: {
+          client_id: { type: 'string', label: 'Client ID' },
+          client_secret: { type: 'password', label: 'Client Secret' }
+        }
+      },
+      google: {
+        name: 'Google',
+        fields: {
+          client_id: { type: 'string', label: 'Client ID' },
+          client_secret: { type: 'password', label: 'Client Secret' }
+        }
+      }
+    }
+  });
+});
+
+app.post('/api/admin/settings/oidc', (_req, res) => {
+  res.json({
+    status: 'success',
+    message: 'Provider settings saved'
   });
 });
 

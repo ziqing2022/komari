@@ -54,12 +54,13 @@ function SelectorInner<T>(props: SelectorProps<T>) {
   } = props;
   const { t } = useTranslation();
 
-  const value = externalValue ?? [];
+  const value = Array.isArray(externalValue) ? externalValue : [];
+  const safeItems = Array.isArray(items) ? items : [];
   const [search, setSearch] = React.useState("");
 
   // 排序 & 搜索
   const processed = React.useMemo(() => {
-    let arr = [...items];
+    let arr = [...safeItems];
     if (sortItems) arr.sort(sortItems);
     if (search.trim()) {
       const kw = search.toLowerCase();
@@ -82,7 +83,7 @@ function SelectorInner<T>(props: SelectorProps<T>) {
   const checkAllState = allChecked ? true : isIndeterminate ? "indeterminate" : false;
 
   // 孤立（value 中但 items 不再存在）
-  const orphanIds = value.filter((id) => !items.some((it) => getId(it) === id));
+  const orphanIds = value.filter((id) => !safeItems.some((it) => getId(it) === id));
 
   const resolvedSearchPlaceholder =
     searchPlaceholder ?? t("common.search");
@@ -121,14 +122,16 @@ function SelectorInner<T>(props: SelectorProps<T>) {
       <div className="selector rounded-md overflow-hidden">
         <Table>
           <TableHeader>
-            <TableHead>
-              <Checkbox
-                checked={checkAllState}
-                onCheckedChange={(checked) => handleCheckAll(!!checked)}
-                aria-label={t("common.select_all")}
-              />
-            </TableHead>
-            <TableHead>{resolvedHeaderLabel}</TableHead>
+            <TableRow>
+              <TableHead>
+                <Checkbox
+                  checked={checkAllState}
+                  onCheckedChange={(checked) => handleCheckAll(!!checked)}
+                  aria-label={t("common.select_all")}
+                />
+              </TableHead>
+              <TableHead>{resolvedHeaderLabel}</TableHead>
+            </TableRow>
           </TableHeader>
           <TableBody>
             {processed.map((it) => {

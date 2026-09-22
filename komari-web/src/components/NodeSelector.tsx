@@ -20,10 +20,12 @@ const NodeSelector: React.FC<NodeSelectorProps> = ({
 }) => {
   const { nodeDetail, isLoading, error } = useNodeDetails();
   const { t } = useTranslation();
-  let nodesFiltered = value;
+  const safeNodeDetail = Array.isArray(nodeDetail) ? nodeDetail : [];
+  const safeValue = Array.isArray(value) ? value : [];
+  let nodesFiltered = safeValue;
   if (hiddenUuidOnlyClient) {
     nodesFiltered = nodesFiltered.filter((node) =>
-      nodeDetail.find((n) => n.uuid === node && !n.is_only_client)
+      safeNodeDetail.find((n) => n.uuid === node && !n.is_only_client)
     );
   }
   if (isLoading) return <div>Loading...</div>;
@@ -35,7 +37,7 @@ const NodeSelector: React.FC<NodeSelectorProps> = ({
       hiddenDescription={hiddenDescription}
       value={nodesFiltered}
       onChange={onChange}
-      items={[...nodeDetail]}
+      items={[...safeNodeDetail]}
       sortItems={(a, b) => (a.weight ?? 0) - (b.weight ?? 0)}
       getId={(n) => n.uuid}
       getLabel={(n) => n.name}

@@ -52,8 +52,11 @@ export interface CronLog {
   id: string;
   task_id: string;
   task_name: string;
-  triggered_at: string;
-  finished_at: string | null;
+  node_name?: string;
+  triggered_at?: string;
+  start_time?: string;
+  finished_at?: string | null;
+  end_time?: string | null;
   exit_code: number | null;
   output: string;
   target_nodes_count: number;
@@ -1008,16 +1011,28 @@ const CronContent = () => {
                   key={log.id}
                   className="border rounded-md p-3 bg-accent-a1 flex flex-col gap-2"
                 >
-                  <Flex justify="between" align="center" wrap="wrap">
-                    <span className="text-xs text-muted-foreground">
-                      触发时间: {new Date(log.triggered_at).toLocaleString()}
-                    </span>
+                  <Flex justify="between" align="center" wrap="wrap" gap="2">
+                    <Flex align="center" gap="2">
+                      <span className="text-xs text-muted-foreground">
+                        触发时间: {(() => {
+                          const rawTime = log.triggered_at || log.start_time;
+                          if (!rawTime) return t("common.just_now", "刚刚");
+                          const d = new Date(rawTime);
+                          return isNaN(d.getTime()) ? String(rawTime) : d.toLocaleString();
+                        })()}
+                      </span>
+                      {log.node_name && (
+                        <Badge color="gray" variant="outline" size="1">
+                          {log.node_name}
+                        </Badge>
+                      )}
+                    </Flex>
                     <Badge color={log.exit_code === 0 ? "green" : "red"} variant="soft">
-                      退出码: {log.exit_code}
+                      退出码: {log.exit_code ?? 0}
                     </Badge>
                   </Flex>
-                  <div className="bg-black/85 text-emerald-400 p-3 rounded font-mono text-xs overflow-x-auto whitespace-pre-wrap">
-                    {log.output}
+                  <div className="bg-black/85 text-emerald-400 p-3 rounded font-mono text-xs overflow-x-auto whitespace-pre-wrap select-text">
+                    {log.output || "[无输出内容]"}
                   </div>
                 </div>
               ))

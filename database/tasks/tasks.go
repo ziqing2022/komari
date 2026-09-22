@@ -1,6 +1,7 @@
 package tasks
 
 import (
+	"strings"
 	"time"
 
 	"github.com/komari-monitor/komari/database/dbcore"
@@ -73,7 +74,7 @@ func GetTaskResultsByTaskId(taskId string) ([]models.TaskResult, error) {
 	return results, nil
 }
 func SaveTaskResult(taskId, clientId, result string, exitCode int, timestamp time.Time) error {
-	return dbcore.GetDBInstance().
+	err := dbcore.GetDBInstance().
 		Model(&models.TaskResult{}).
 		Where("task_id = ? AND client = ?", taskId, clientId).
 		Updates(map[string]interface{}{
@@ -81,6 +82,21 @@ func SaveTaskResult(taskId, clientId, result string, exitCode int, timestamp tim
 			"exit_code":   exitCode,
 			"finished_at": timestamp.UTC(),
 		}).Error
+	if err == nil && strings.HasPrefix(taskId, "cron-") {
+		trimmed := strings.TrimPrefix(taskId, "cron-")
+		parts := strings.Split(trimmed, "-")
+		if len(parts) > 0 && parts[0] != "" {
+			cronID := parts[0]
+			var cronTask models.CronTask
+			db := dbcore.GetDBInstance()
+			if db.Where("id = ? OR id = ?", cronID, "cron-"+cronID).First(&cronTask).Error == nil {
+				cronTask.LastExitCode = &exitCode
+				cronTask.LastResult = result
+				_ = db.Save(&cronTask).Error
+			}
+		}
+	}
+	return err
 }
 
 func ClearTaskResultsByTimeBefore(before time.Time) error {

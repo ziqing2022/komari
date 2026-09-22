@@ -9,6 +9,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/komari-monitor/komari/database/dbcore"
 	"github.com/komari-monitor/komari/database/models"
+	"github.com/komari-monitor/komari/utils"
 	"github.com/komari-monitor/komari/web/api"
 )
 
@@ -156,6 +157,7 @@ func CreateCronTask(c *gin.Context) {
 		api.RespondError(c, http.StatusInternalServerError, "Failed to create task: "+err.Error())
 		return
 	}
+	go func() { _ = utils.ReloadCronSchedule() }()
 
 	c.JSON(http.StatusOK, gin.H{
 		"status":  "success",
@@ -240,6 +242,7 @@ func UpdateCronTask(c *gin.Context) {
 			return
 		}
 	}
+	go func() { _ = utils.ReloadCronSchedule() }()
 
 	c.JSON(http.StatusOK, gin.H{
 		"status":  "success",
@@ -265,6 +268,7 @@ func DeleteCronTask(c *gin.Context) {
 		prefixedTask := "task-" + bareID
 		_ = db.Where("id = ? OR id = ? OR id = ? OR id = ?", id, bareID, prefixedCron, prefixedTask).Delete(&models.CronTask{}).Error
 	}
+	go func() { _ = utils.ReloadCronSchedule() }()
 
 	c.JSON(http.StatusOK, gin.H{
 		"status":  "success",
@@ -304,6 +308,7 @@ func ToggleCronTask(c *gin.Context) {
 	task.UpdatedAt = time.Now().UTC()
 
 	_ = db.Save(task).Error
+	go func() { _ = utils.ReloadCronSchedule() }()
 
 	c.JSON(http.StatusOK, gin.H{
 		"status":  "success",
@@ -312,71 +317,114 @@ func ToggleCronTask(c *gin.Context) {
 	})
 }
 
-// RunCronTask 手动立即触发定时任务
+// RunCronTask 手动立即触发定时任务并下发给目标服务器执行
 func RunCronTask(c *gin.Context) {
 	id := c.Param("id")
 	task, err := findCronTask(id)
-	now := time.Now().UTC()
 	if err != nil || task == nil {
-		c.JSON(http.StatusOK, gin.H{
-			"status":  "success",
-			"message": "Task triggered successfully",
-			"task": gin.H{
-				"id":             id,
-				"last_run_at":    now,
-				"last_exit_code": 0,
-				"last_result":    fmt.Sprintf("[%s] Triggered successfully on selected servers.", now.Format("2006-01-02 15:04:05")),
-			},
-			"data": gin.H{
-				"id":             id,
-				"last_run_at":    now,
-				"last_exit_code": 0,
-				"last_result":    fmt.Sprintf("[%s] Triggered successfully on selected servers.", now.Format("2006-01-02 15:04:05")),
-			},
-		})
+		api.RespondError(c, http.StatusNotFound, "Task not found")
 		return
 	}
 
-	exitCode := 0
-	task.LastRunAt = &now
-	task.LastExitCode = &exitCode
-	task.LastResult = fmt.Sprintf("[%s] Triggered successfully on selected servers.", now.Format("2006-01-02 15:04:05"))
-	task.UpdatedAt = now
-
-	db := dbcore.GetDBInstance()
-	_ = db.Save(task).Error
+	taskId, err := utils.ExecuteCronTask(task)
+	if err != nil {
+		api.RespondError(c, http.StatusInternalServerError, "Failed to execute task: "+err.Error())
+		return
+	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"status":  "success",
 		"message": "Task triggered successfully",
+		"task_id": taskId,
 		"task":    task,
 		"data":    task,
 	})
 }
 
-// GetCronTaskLogs 获取定时任务执行日志
+// GetCronTaskLogs 获取定时任务执行日志（包含客户端真实执行回传输出）
 func GetCronTaskLogs(c *gin.Context) {
 	id := c.Param("id")
 	task, err := findCronTask(id)
-	now := time.Now().UTC()
-
-	cmd := "journalctl --vacuum-time=3d && rm -rf /tmp/*.log"
-	taskID := id
-	if err == nil && task != nil {
-		cmd = task.Command
-		taskID = task.Id
+	if err != nil || task == nil {
+		api.RespondError(c, http.StatusNotFound, "Task not found")
+		return
 	}
 
-	logs := []gin.H{
-		{
-			"id":         fmt.Sprintf("log-%s-1", taskID),
-			"task_id":    taskID,
-			"node_name":  "All Targets",
-			"start_time": now.Add(-5 * time.Minute).Format(time.RFC3339),
-			"end_time":   now.Add(-4 * time.Minute).Format(time.RFC3339),
-			"exit_code":  0,
-			"output":     fmt.Sprintf("[Execution completed]\nCommand: %s\nStatus: success\nCode: 0", cmd),
-		},
+	db := dbcore.GetDBInstance()
+	var results []models.TaskResult
+	prefix := fmt.Sprintf("cron-%s-%%", task.Id)
+	bareID := strings.TrimPrefix(strings.TrimPrefix(task.Id, "cron-"), "task-")
+	altPrefix := fmt.Sprintf("cron-%s-%%", bareID)
+
+	_ = db.Preload("ClientInfo").
+		Where("task_id LIKE ? OR task_id LIKE ? OR task_id = ?", prefix, altPrefix, task.Id).
+		Order("created_at desc").
+		Limit(50).
+		Find(&results).Error
+
+	var logs []gin.H
+	for _, res := range results {
+		clientName := res.Client
+		if res.ClientInfo.Name != "" {
+			clientName = res.ClientInfo.Name
+		}
+		exitCode := 0
+		if res.ExitCode != nil {
+			exitCode = *res.ExitCode
+		}
+		output := strings.TrimSpace(res.Result)
+		if output == "" {
+			if res.FinishedAt == nil {
+				output = "[Command dispatched, awaiting execution response from agent...]"
+			} else {
+				output = "[Command completed with no stdout/stderr output]"
+			}
+		}
+
+		var finishedAtStr any = nil
+		if res.FinishedAt != nil {
+			finishedAtStr = res.FinishedAt.UTC().Format(time.RFC3339)
+		}
+
+		timeStr := res.CreatedAt.UTC().Format(time.RFC3339)
+		logs = append(logs, gin.H{
+			"id":                 fmt.Sprintf("%s-%s", res.TaskId, res.Client),
+			"task_id":            task.Id,
+			"task_name":          task.Name,
+			"node_name":          clientName,
+			"triggered_at":       timeStr,
+			"start_time":         timeStr,
+			"finished_at":        finishedAtStr,
+			"end_time":           finishedAtStr,
+			"exit_code":          exitCode,
+			"output":             output,
+			"target_nodes_count": 1,
+		})
+	}
+
+	if len(logs) == 0 && task.LastRunAt != nil {
+		exitCode := 0
+		if task.LastExitCode != nil {
+			exitCode = *task.LastExitCode
+		}
+		output := task.LastResult
+		if strings.TrimSpace(output) == "" {
+			output = fmt.Sprintf("Command: %s\nStatus: Triggered\nCode: %d", task.Command, exitCode)
+		}
+		timeStr := task.LastRunAt.UTC().Format(time.RFC3339)
+		logs = append(logs, gin.H{
+			"id":                 fmt.Sprintf("log-%s-latest", task.Id),
+			"task_id":            task.Id,
+			"task_name":          task.Name,
+			"node_name":          "All Targets",
+			"triggered_at":       timeStr,
+			"start_time":         timeStr,
+			"finished_at":        timeStr,
+			"end_time":           timeStr,
+			"exit_code":          exitCode,
+			"output":             output,
+			"target_nodes_count": len(task.TargetNodes),
+		})
 	}
 
 	c.JSON(http.StatusOK, gin.H{
@@ -386,3 +434,4 @@ func GetCronTaskLogs(c *gin.Context) {
 		"data":    logs,
 	})
 }
+

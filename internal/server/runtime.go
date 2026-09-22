@@ -191,6 +191,9 @@ func registerScheduledWork() {
 	if err := d_notification.ReloadLoadNotificationSchedule(); err != nil {
 		logger.ErrorArgs("server", "Failed to reload load notification schedule:", err)
 	}
+	if err := tasks.ReloadCronSchedule(); err != nil {
+		logger.ErrorArgs("server", "Failed to reload cron schedule:", err)
+	}
 	if err := scheduler.AddFunc("records:cleanup", "@every 30m", cleanupScheduledData); err != nil {
 		logger.ErrorArgs("server", "Failed to add cleanup scheduled task:", err)
 	}

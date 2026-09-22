@@ -3,6 +3,7 @@ import http from 'http';
 import path from 'path';
 import fs from 'fs';
 import crypto from 'crypto';
+import { exec } from 'child_process';
 import QRCode from 'qrcode';
 import { WebSocketServer, WebSocket } from 'ws';
 
@@ -873,6 +874,27 @@ app.post('/api/admin/cron/:id/toggle', (req, res) => {
   res.json({ status: 'success', enabled: task.enabled, data: { enabled: task.enabled } });
 });
 
+const cronLogsFilePath = path.join(process.cwd(), 'komari-web', 'cron-logs.json');
+
+function loadCronLogs(): Record<string, any[]> {
+  try {
+    if (fs.existsSync(cronLogsFilePath)) {
+      return JSON.parse(fs.readFileSync(cronLogsFilePath, 'utf-8'));
+    }
+  } catch (e) {
+    console.error('Error reading cron logs file:', e);
+  }
+  return {};
+}
+
+function saveCronLogs(logs: Record<string, any[]>) {
+  try {
+    fs.writeFileSync(cronLogsFilePath, JSON.stringify(logs, null, 2), 'utf-8');
+  } catch (e) {
+    console.error('Error writing cron logs file:', e);
+  }
+}
+
 app.post('/api/admin/cron/:id/run', requireSensitive2FA, (req, res) => {
   const { id } = req.params;
   cronTasksList = loadCronTasks();
@@ -880,10 +902,40 @@ app.post('/api/admin/cron/:id/run', requireSensitive2FA, (req, res) => {
   if (!task) {
     return res.status(404).json({ status: 'error', message: 'Task not found' });
   }
-  task.last_run_at = new Date().toISOString();
+  const now = new Date().toISOString();
+  task.last_run_at = now;
+  task.updated_at = now;
+
+  exec(task.command, { timeout: 15000 }, (error, stdout, stderr) => {
+    const finishedAt = new Date().toISOString();
+    const exitCode = error ? (typeof error.code === 'number' ? error.code : 1) : 0;
+    const output = (stdout || stderr || (error ? error.message : '[Execution completed with no output]')).trim();
+
+    task.last_exit_code = exitCode;
+    task.last_result = output;
+    saveCronTasks(cronTasksList);
+
+    const allLogs = loadCronLogs();
+    const taskLogs = allLogs[task.id] || [];
+    taskLogs.unshift({
+      id: `log-${Date.now()}`,
+      task_id: task.id,
+      task_name: task.name,
+      node_name: 'Local Server Agent',
+      triggered_at: now,
+      start_time: now,
+      finished_at: finishedAt,
+      end_time: finishedAt,
+      exit_code: exitCode,
+      output: output,
+      target_nodes_count: task.target_nodes.includes('all') ? 1 : task.target_nodes.length,
+    });
+    allLogs[task.id] = taskLogs.slice(0, 50);
+    saveCronLogs(allLogs);
+  });
+
   task.last_exit_code = 0;
-  task.last_result = `[Manual Trigger ${new Date().toLocaleTimeString()}] Executed successfully on target nodes.`;
-  task.updated_at = new Date().toISOString();
+  task.last_result = `[${new Date().toLocaleTimeString()}] Task dispatched and executing...`;
   saveCronTasks(cronTasksList);
   res.json({ status: 'success', message: 'Task executed successfully', task, data: task });
 });
@@ -894,20 +946,32 @@ app.get('/api/admin/cron/:id/logs', (req, res) => {
   if (!task) {
     return res.status(404).json({ status: 'error', message: 'Task not found' });
   }
-  res.json({
-    status: 'success',
-    logs: [
+  const allLogs = loadCronLogs();
+  let taskLogs = allLogs[task.id] || [];
+
+  if (taskLogs.length === 0) {
+    const timeStr = task.last_run_at || new Date().toISOString();
+    taskLogs = [
       {
-        id: `log-${Date.now()}-1`,
+        id: `log-${task.id}-init`,
         task_id: task.id,
         task_name: task.name,
-        triggered_at: task.last_run_at || new Date().toISOString(),
-        finished_at: task.last_run_at || new Date().toISOString(),
+        node_name: 'Local Server Agent',
+        triggered_at: timeStr,
+        start_time: timeStr,
+        finished_at: timeStr,
+        end_time: timeStr,
         exit_code: task.last_exit_code ?? 0,
-        output: task.last_result || `Command "${task.command}" completed with returncode 0.`,
-        target_nodes_count: task.target_nodes.includes('all') ? 5 : task.target_nodes.length,
+        output: task.last_result || `Command "${task.command}" ready. Click "Run" to execute.`,
+        target_nodes_count: task.target_nodes.includes('all') ? 1 : task.target_nodes.length,
       }
-    ]
+    ];
+  }
+
+  res.json({
+    status: 'success',
+    logs: taskLogs,
+    data: taskLogs,
   });
 });
 

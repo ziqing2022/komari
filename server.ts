@@ -911,6 +911,104 @@ app.get('/api/admin/cron/:id/logs', (req, res) => {
   });
 });
 
+// Notification Channels Configuration Store
+const notificationChannels = [
+  {
+    id: "telegram",
+    configuration: {
+      type: "managed",
+      name: { en: "Telegram", "zh-CN": "Telegram", ja: "Telegram" },
+      data: [
+        { key: "bot_token", name: "Bot Token", type: "string", required: true, help: "Telegram Bot API Token" },
+        { key: "chat_id", name: "Chat ID", type: "string", required: true, help: "Target Chat ID / Group ID" },
+        { key: "message_thread_id", name: "Message Thread ID", type: "string", required: false, help: "Optional message thread id (for supergroups)" },
+        { key: "endpoint", name: "API Endpoint", type: "string", required: true, default: "https://api.telegram.org/bot", help: "Telegram API endpoint" },
+      ]
+    }
+  },
+  {
+    id: "bark",
+    configuration: {
+      type: "managed",
+      name: { en: "Bark", "zh-CN": "Bark", ja: "Bark" },
+      data: [
+        { key: "server_url", name: "Server URL", type: "string", required: true, default: "https://api.day.app", help: "Bark server URL" },
+        { key: "device_key", name: "Device Key", type: "string", required: true, help: "Your Bark device key" },
+        { key: "icon", name: "Icon", type: "string", required: false, help: "Push notification icon URL" },
+        { key: "level", name: "Level", type: "option", default: "timeSensitive", options: "active,timeSensitive,passive,critical", help: "Push notification level" },
+      ]
+    }
+  },
+  {
+    id: "webhook",
+    configuration: {
+      type: "managed",
+      name: { en: "Webhook", "zh-CN": "自定义 Webhook", ja: "Webhook" },
+      data: [
+        { key: "url", name: "URL", type: "string", required: true, help: "Webhook destination URL" },
+        { key: "method", name: "HTTP Method", type: "option", default: "POST", options: "POST,GET,PUT", help: "HTTP Method" },
+        { key: "headers", name: "Headers", type: "richtext", required: false, help: "Custom HTTP Headers (JSON format)" },
+        { key: "body_template", name: "Body Template", type: "richtext", required: false, help: "Custom Request Body Template" },
+      ]
+    }
+  },
+  {
+    id: "email",
+    configuration: {
+      type: "managed",
+      name: { en: "Email (SMTP)", "zh-CN": "邮件通知 (SMTP)", ja: "メール" },
+      data: [
+        { key: "smtp_host", name: "SMTP Host", type: "string", required: true, help: "SMTP Server Host (e.g. smtp.gmail.com)" },
+        { key: "smtp_port", name: "SMTP Port", type: "string", required: true, default: "465", help: "SMTP Port (e.g. 465 / 587)" },
+        { key: "username", name: "Username", type: "string", required: true, help: "SMTP Username / Email" },
+        { key: "password", name: "Password", type: "string", required: true, help: "SMTP Password / Auth Code" },
+        { key: "to", name: "Recipient", type: "string", required: true, help: "Recipient Email Address" },
+      ]
+    }
+  },
+  {
+    id: "serverchan3",
+    configuration: {
+      type: "managed",
+      name: { en: "ServerChan3", "zh-CN": "Server酱3", ja: "ServerChan3" },
+      data: [
+        { key: "sendkey", name: "SendKey", type: "string", required: true, help: "ServerChan SendKey" },
+      ]
+    }
+  },
+  {
+    id: "serverchanturbo",
+    configuration: {
+      type: "managed",
+      name: { en: "ServerChan Turbo", "zh-CN": "Server酱·Turbo", ja: "ServerChan Turbo" },
+      data: [
+        { key: "sendkey", name: "SendKey", type: "string", required: true, help: "ServerChan Turbo SendKey" },
+      ]
+    }
+  }
+];
+
+const savedChannelConfigurations: Record<string, Record<string, any>> = {
+  telegram: {
+    endpoint: "https://api.telegram.org/bot",
+    bot_token: "",
+    chat_id: ""
+  },
+  bark: {
+    server_url: "https://api.day.app",
+    device_key: "",
+    level: "timeSensitive"
+  },
+  webhook: {
+    method: "POST",
+    url: "https://example.com/api/webhook"
+  },
+  email: {
+    smtp_port: "465",
+    smtp_host: "smtp.example.com"
+  }
+};
+
 // 5. JSON-RPC 2.0 Dispatcher (HTTP POST & WebSocket)
 function handleRpcCall(method: string, params: any): any {
   switch (method) {
@@ -935,10 +1033,31 @@ function handleRpcCall(method: string, params: any): any {
     case 'getNodes':
       return Object.values(initialNodes);
 
-    case 'admin:getNotificationChannelConfiguration':
-      return [];
+    case 'admin:listNotificationChannels':
+      return notificationChannels;
+
+    case 'admin:getNotificationChannelConfiguration': {
+      const channelId = (params as any)?.id || (params as any)?.provider || '';
+      const ch = notificationChannels.find((c) => c.id === channelId);
+      return {
+        configuration: ch?.configuration || { type: 'managed', name: channelId, data: [] },
+        data: savedChannelConfigurations[channelId] || {}
+      };
+    }
+
+    case 'admin:setNotificationChannelConfiguration': {
+      const { id: channelId, data } = (params as any) || {};
+      if (channelId && data) {
+        savedChannelConfigurations[channelId] = data;
+      }
+      return { message: 'Notification channel configuration saved successfully' };
+    }
+
+    case 'admin:testSendMessage':
+      return { status: 'success', message: 'Test notification message sent successfully' };
 
     case 'admin:getPlugins':
+    case 'admin:listPlugins':
       return [];
 
     default:

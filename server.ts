@@ -776,47 +776,71 @@ app.get('/api/admin/cron', (_req, res) => {
   cronTasksList = loadCronTasks();
   res.json({
     status: 'success',
-    tasks: cronTasksList
+    tasks: cronTasksList,
+    data: cronTasksList,
   });
 });
 
 app.post('/api/admin/cron', requireSensitive2FA, (req, res) => {
+  cronTasksList = loadCronTasks();
   const { name, command, schedule_type, interval_minutes, cron_expression, target_nodes, enabled } = req.body;
   if (!name || !command) {
     return res.status(400).json({ status: 'error', message: 'Task name and command are required.' });
   }
   const newTask: CronTaskItem = {
-    id: `cron-${Date.now()}`,
+    id: req.body.id || `cron-${Date.now()}`,
     name,
     command,
     schedule_type: schedule_type || 'preset',
-    interval_minutes: interval_minutes || 30,
+    interval_minutes: Number(interval_minutes) || 30,
     cron_expression,
-    target_nodes: target_nodes || ['all'],
+    target_nodes: Array.isArray(target_nodes) ? target_nodes : ['all'],
     enabled: enabled !== false,
     last_run_at: null,
     last_exit_code: null,
     last_result: null,
-    next_run_at: new Date(Date.now() + (interval_minutes || 30) * 60 * 1000).toISOString(),
+    next_run_at: new Date(Date.now() + (Number(interval_minutes) || 30) * 60 * 1000).toISOString(),
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
   };
   cronTasksList.unshift(newTask);
   saveCronTasks(cronTasksList);
-  res.json({ status: 'success', task: newTask });
+  res.json({ status: 'success', task: newTask, data: newTask });
 });
 
 app.put('/api/admin/cron/:id', requireSensitive2FA, (req, res) => {
   const { id } = req.params;
-  const idx = cronTasksList.findIndex((t) => matchTaskId(t, id));
-  if (idx === -1) {
-    return res.status(404).json({ status: 'error', message: 'Task not found' });
-  }
+  cronTasksList = loadCronTasks();
+  let idx = cronTasksList.findIndex((t) => matchTaskId(t, id));
   const bodyData = { ...req.body };
   delete bodyData['2fa_code'];
   delete bodyData['two_factor_code'];
   delete bodyData['code'];
   delete bodyData['otp'];
+
+  if (idx === -1) {
+    // If not found in existing list, create or append with this id
+    const newTask: CronTaskItem = {
+      id: String(id),
+      name: bodyData.name || '新定时任务',
+      command: bodyData.command || 'echo hello',
+      schedule_type: bodyData.schedule_type || 'preset',
+      interval_minutes: Number(bodyData.interval_minutes) || 30,
+      cron_expression: bodyData.cron_expression,
+      target_nodes: Array.isArray(bodyData.target_nodes) ? bodyData.target_nodes : ['all'],
+      enabled: bodyData.enabled !== undefined ? Boolean(bodyData.enabled) : true,
+      last_run_at: null,
+      last_exit_code: null,
+      last_result: null,
+      next_run_at: new Date(Date.now() + (Number(bodyData.interval_minutes) || 30) * 60 * 1000).toISOString(),
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      ...bodyData,
+    };
+    cronTasksList.unshift(newTask);
+    saveCronTasks(cronTasksList);
+    return res.json({ status: 'success', task: newTask, data: newTask });
+  }
 
   cronTasksList[idx] = {
     ...cronTasksList[idx],
@@ -825,18 +849,20 @@ app.put('/api/admin/cron/:id', requireSensitive2FA, (req, res) => {
     updated_at: new Date().toISOString()
   };
   saveCronTasks(cronTasksList);
-  res.json({ status: 'success', task: cronTasksList[idx] });
+  res.json({ status: 'success', task: cronTasksList[idx], data: cronTasksList[idx] });
 });
 
 app.delete('/api/admin/cron/:id', requireSensitive2FA, (req, res) => {
   const { id } = req.params;
+  cronTasksList = loadCronTasks();
   cronTasksList = cronTasksList.filter((t) => !matchTaskId(t, id));
   saveCronTasks(cronTasksList);
-  res.json({ status: 'success' });
+  res.json({ status: 'success', message: 'Task deleted successfully' });
 });
 
 app.post('/api/admin/cron/:id/toggle', (req, res) => {
   const { id } = req.params;
+  cronTasksList = loadCronTasks();
   const task = cronTasksList.find((t) => matchTaskId(t, id));
   if (!task) {
     return res.status(404).json({ status: 'error', message: 'Task not found' });
@@ -844,11 +870,12 @@ app.post('/api/admin/cron/:id/toggle', (req, res) => {
   task.enabled = req.body.enabled !== undefined ? req.body.enabled : !task.enabled;
   task.updated_at = new Date().toISOString();
   saveCronTasks(cronTasksList);
-  res.json({ status: 'success', enabled: task.enabled });
+  res.json({ status: 'success', enabled: task.enabled, data: { enabled: task.enabled } });
 });
 
 app.post('/api/admin/cron/:id/run', requireSensitive2FA, (req, res) => {
   const { id } = req.params;
+  cronTasksList = loadCronTasks();
   const task = cronTasksList.find((t) => matchTaskId(t, id));
   if (!task) {
     return res.status(404).json({ status: 'error', message: 'Task not found' });
@@ -858,7 +885,7 @@ app.post('/api/admin/cron/:id/run', requireSensitive2FA, (req, res) => {
   task.last_result = `[Manual Trigger ${new Date().toLocaleTimeString()}] Executed successfully on target nodes.`;
   task.updated_at = new Date().toISOString();
   saveCronTasks(cronTasksList);
-  res.json({ status: 'success', task });
+  res.json({ status: 'success', message: 'Task executed successfully', task, data: task });
 });
 
 app.get('/api/admin/cron/:id/logs', (req, res) => {

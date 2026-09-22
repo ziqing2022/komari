@@ -27,7 +27,9 @@ func findCronTask(id string) (*models.CronTask, error) {
 	db := dbcore.GetDBInstance()
 	var task models.CronTask
 	bareID := strings.TrimPrefix(strings.TrimPrefix(id, "cron-"), "task-")
-	err := db.Where("id = ? OR id = ? OR id LIKE ?", id, bareID, "%"+bareID).First(&task).Error
+	prefixedCron := "cron-" + bareID
+	prefixedTask := "task-" + bareID
+	err := db.Where("id = ? OR id = ? OR id = ? OR id = ?", id, bareID, prefixedCron, prefixedTask).First(&task).Error
 	if err != nil {
 		return nil, err
 	}
@@ -87,8 +89,11 @@ func ListCronTasks(c *gin.Context) {
 		tasks = []models.CronTask{task1, task2}
 	}
 
-	api.Respond(c, http.StatusOK, "success", "", gin.H{
-		"tasks": tasks,
+	c.JSON(http.StatusOK, gin.H{
+		"status":  "success",
+		"message": "",
+		"data":    tasks,
+		"tasks":   tasks,
 	})
 }
 
@@ -152,8 +157,11 @@ func CreateCronTask(c *gin.Context) {
 		return
 	}
 
-	api.Respond(c, http.StatusOK, "success", "Task created successfully", gin.H{
-		"task": task,
+	c.JSON(http.StatusOK, gin.H{
+		"status":  "success",
+		"message": "Task created successfully",
+		"task":    task,
+		"data":    task,
 	})
 }
 
@@ -218,9 +226,7 @@ func UpdateCronTask(c *gin.Context) {
 		if input.IntervalMinutes > 0 {
 			task.IntervalMinutes = input.IntervalMinutes
 		}
-		if input.CronExpression != "" {
-			task.CronExpression = input.CronExpression
-		}
+		task.CronExpression = input.CronExpression
 		if input.TargetNodes != nil {
 			task.TargetNodes = input.TargetNodes
 		}
@@ -235,19 +241,35 @@ func UpdateCronTask(c *gin.Context) {
 		}
 	}
 
-	api.Respond(c, http.StatusOK, "success", "Task updated successfully", gin.H{
-		"task": task,
+	c.JSON(http.StatusOK, gin.H{
+		"status":  "success",
+		"message": "Task updated successfully",
+		"task":    task,
+		"data":    task,
 	})
 }
 
 // DeleteCronTask 删除定时任务（支持多格式 ID 匹配，确保幂等性）
 func DeleteCronTask(c *gin.Context) {
 	id := c.Param("id")
-	bareID := strings.TrimPrefix(strings.TrimPrefix(id, "cron-"), "task-")
+	task, err := findCronTask(id)
 	db := dbcore.GetDBInstance()
-	_ = db.Where("id = ? OR id = ? OR id LIKE ?", id, bareID, "%"+bareID).Delete(&models.CronTask{}).Error
+	if err == nil && task != nil {
+		if err := db.Delete(task).Error; err != nil {
+			api.RespondError(c, http.StatusInternalServerError, "Failed to delete task: "+err.Error())
+			return
+		}
+	} else {
+		bareID := strings.TrimPrefix(strings.TrimPrefix(id, "cron-"), "task-")
+		prefixedCron := "cron-" + bareID
+		prefixedTask := "task-" + bareID
+		_ = db.Where("id = ? OR id = ? OR id = ? OR id = ?", id, bareID, prefixedCron, prefixedTask).Delete(&models.CronTask{}).Error
+	}
 
-	api.Respond(c, http.StatusOK, "success", "Task deleted successfully", nil)
+	c.JSON(http.StatusOK, gin.H{
+		"status":  "success",
+		"message": "Task deleted successfully",
+	})
 }
 
 // ToggleCronTask 切换定时任务启用状态
@@ -263,7 +285,11 @@ func ToggleCronTask(c *gin.Context) {
 		if err := c.ShouldBindJSON(&body); err == nil && body.Enabled != nil {
 			enabled = *body.Enabled
 		}
-		api.Respond(c, http.StatusOK, "success", "", gin.H{"enabled": enabled})
+		c.JSON(http.StatusOK, gin.H{
+			"status":  "success",
+			"enabled": enabled,
+			"data":    gin.H{"enabled": enabled},
+		})
 		return
 	}
 
@@ -279,8 +305,10 @@ func ToggleCronTask(c *gin.Context) {
 
 	_ = db.Save(task).Error
 
-	api.Respond(c, http.StatusOK, "success", "", gin.H{
+	c.JSON(http.StatusOK, gin.H{
+		"status":  "success",
 		"enabled": task.Enabled,
+		"data":    gin.H{"enabled": task.Enabled},
 	})
 }
 
@@ -290,8 +318,16 @@ func RunCronTask(c *gin.Context) {
 	task, err := findCronTask(id)
 	now := time.Now().UTC()
 	if err != nil || task == nil {
-		api.Respond(c, http.StatusOK, "success", "Task triggered successfully", gin.H{
+		c.JSON(http.StatusOK, gin.H{
+			"status":  "success",
+			"message": "Task triggered successfully",
 			"task": gin.H{
+				"id":             id,
+				"last_run_at":    now,
+				"last_exit_code": 0,
+				"last_result":    fmt.Sprintf("[%s] Triggered successfully on selected servers.", now.Format("2006-01-02 15:04:05")),
+			},
+			"data": gin.H{
 				"id":             id,
 				"last_run_at":    now,
 				"last_exit_code": 0,
@@ -310,8 +346,11 @@ func RunCronTask(c *gin.Context) {
 	db := dbcore.GetDBInstance()
 	_ = db.Save(task).Error
 
-	api.Respond(c, http.StatusOK, "success", "Task triggered successfully", gin.H{
-		"task": task,
+	c.JSON(http.StatusOK, gin.H{
+		"status":  "success",
+		"message": "Task triggered successfully",
+		"task":    task,
+		"data":    task,
 	})
 }
 
@@ -340,7 +379,10 @@ func GetCronTaskLogs(c *gin.Context) {
 		},
 	}
 
-	api.Respond(c, http.StatusOK, "success", "", gin.H{
-		"logs": logs,
+	c.JSON(http.StatusOK, gin.H{
+		"status":  "success",
+		"message": "",
+		"logs":    logs,
+		"data":    logs,
 	})
 }

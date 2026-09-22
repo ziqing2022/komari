@@ -164,15 +164,21 @@ const CronContent = () => {
       const res = await fetch("/api/admin/cron");
       if (res.ok) {
         const json = await res.json();
-        const loadedTasks: CronTask[] = Array.isArray(json?.tasks)
-          ? json.tasks
-          : Array.isArray(json?.data)
-          ? json.data
-          : [];
-        setTasks(loadedTasks);
-        localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(loadedTasks));
-        localStorage.setItem(LOCAL_STORAGE_INIT_KEY, "true");
-        return;
+        let loadedTasks: CronTask[] | null = null;
+        if (Array.isArray(json?.tasks)) {
+          loadedTasks = json.tasks;
+        } else if (Array.isArray(json?.data)) {
+          loadedTasks = json.data;
+        } else if (Array.isArray(json?.data?.tasks)) {
+          loadedTasks = json.data.tasks;
+        }
+
+        if (loadedTasks !== null) {
+          setTasks(loadedTasks);
+          localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(loadedTasks));
+          localStorage.setItem(LOCAL_STORAGE_INIT_KEY, "true");
+          return;
+        }
       }
     } catch (e) {
       console.warn("Failed to load cron tasks from API, trying fallback storage", e);
@@ -275,7 +281,7 @@ const CronContent = () => {
 
     try {
       const url = editingTask
-        ? `/api/admin/cron/${editingTask.id}`
+        ? `/api/admin/cron/${encodeURIComponent(editingTask.id)}`
         : "/api/admin/cron";
       const method = editingTask ? "PUT" : "POST";
 
@@ -301,11 +307,11 @@ const CronContent = () => {
       }
 
       const resData = await res.json().catch(() => ({}));
-      const savedTask = resData.task || updatedItem;
+      const savedTask: CronTask = resData.task || resData.data?.task || resData.data || updatedItem;
 
       setTasks((prev) => {
         const nextTasks = editingTask
-          ? prev.map((t) => (t.id === editingTask.id ? savedTask : t))
+          ? prev.map((t) => (t.id === editingTask.id ? { ...t, ...savedTask } : t))
           : [savedTask, ...prev];
         localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(nextTasks));
         localStorage.setItem(LOCAL_STORAGE_INIT_KEY, "true");
@@ -315,6 +321,9 @@ const CronContent = () => {
       setEditDialogOpen(false);
       setForm2FaCode("");
       toast.success(t("cron.saveSuccess", "定时任务已成功保存"));
+
+      // Refresh to guarantee fresh state from backend
+      loadTasks();
     } catch (err: any) {
       console.warn("API save error:", err);
       toast.error(err.message || t("common.error", "保存失败，请检查验证码"));
@@ -329,7 +338,7 @@ const CronContent = () => {
     const targetId = task.id;
 
     try {
-      const res = await fetch(`/api/admin/cron/${targetId}/toggle`, {
+      const res = await fetch(`/api/admin/cron/${encodeURIComponent(targetId)}/toggle`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ enabled: nextStatus }),
@@ -347,6 +356,7 @@ const CronContent = () => {
         return updated;
       });
       toast.success(t("cron.statusUpdated", "任务状态已更新"));
+      loadTasks();
     } catch (e: any) {
       console.warn("API toggle error:", e);
       toast.error(e.message || "更新状态失败");
@@ -380,7 +390,7 @@ const CronContent = () => {
         headers["X-2FA-Code"] = clean2FaCode;
       }
 
-      const res = await fetch(`/api/admin/cron/${targetId}/run`, {
+      const res = await fetch(`/api/admin/cron/${encodeURIComponent(targetId)}/run`, {
         method: "POST",
         headers,
         body: JSON.stringify({ "2fa_code": clean2FaCode || undefined }),
@@ -392,7 +402,7 @@ const CronContent = () => {
       }
 
       const resJson = await res.json().catch(() => ({}));
-      const updatedTask = resJson.task;
+      const updatedTask = resJson.task || resJson.data?.task || resJson.data;
 
       setTasks((prev) => {
         const updated = prev.map((item) =>
@@ -413,6 +423,7 @@ const CronContent = () => {
       setRunDialogOpen(false);
       setRun2FaCode("");
       toast.success(t("cron.runSuccess", "已触发即时执行"));
+      loadTasks();
     } catch (err: any) {
       console.warn("API run error:", err);
       toast.error(err.message || t("common.error", "执行失败，请检查验证码"));
@@ -448,7 +459,7 @@ const CronContent = () => {
         headers["X-2FA-Code"] = clean2FaCode;
       }
 
-      const res = await fetch(`/api/admin/cron/${targetId}`, {
+      const res = await fetch(`/api/admin/cron/${encodeURIComponent(targetId)}`, {
         method: "DELETE",
         headers,
         body: JSON.stringify({ "2fa_code": clean2FaCode || undefined }),
@@ -468,7 +479,8 @@ const CronContent = () => {
 
       setDeleteDialogOpen(false);
       setDelete2FaCode("");
-      toast.success(t("cron.deleteSuccess", "定时任务已成功删除"));
+      toast.success(t("cron.deleteSuccess", "任务已成功删除"));
+      loadTasks();
     } catch (err: any) {
       console.warn("API delete error:", err);
       toast.error(err.message || t("common.error", "删除失败，请检查验证码"));

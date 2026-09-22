@@ -8,10 +8,8 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-	"github.com/komari-monitor/komari/database/clients"
 	"github.com/komari-monitor/komari/database/dbcore"
 	"github.com/komari-monitor/komari/database/models"
-	"github.com/komari-monitor/komari/database/tasks"
 	"github.com/komari-monitor/komari/internal/scheduler"
 	v2 "github.com/komari-monitor/komari/protocol/v2"
 	logger "github.com/komari-monitor/komari/utils/log"
@@ -24,6 +22,8 @@ func ExecuteCronTask(task *models.CronTask) (string, error) {
 		return "", fmt.Errorf("task or command is empty")
 	}
 
+	db := dbcore.GetDBInstance()
+
 	// 1. 筛选目标节点
 	var targetUUIDs []string
 	isAll := len(task.TargetNodes) == 0
@@ -35,8 +35,9 @@ func ExecuteCronTask(task *models.CronTask) (string, error) {
 	}
 
 	if isAll {
-		allClients, _ := clients.GetAllClientBasicInfo()
-		for _, c := range allClients {
+		var clientRecords []models.Client
+		_ = db.Select("uuid").Find(&clientRecords).Error
+		for _, c := range clientRecords {
 			targetUUIDs = append(targetUUIDs, c.UUID)
 		}
 		for uuid := range agent_runtime.GetConnectedClients() {
@@ -78,8 +79,26 @@ func ExecuteCronTask(task *models.CronTask) (string, error) {
 
 	// 3. 记录任务至数据库
 	if len(taskClients) > 0 {
-		if err := tasks.CreateTask(taskId, taskClients, task.Command); err != nil {
+		taskRecord := models.Task{
+			TaskId:  taskId,
+			Clients: models.StringArray(taskClients),
+			Command: task.Command,
+		}
+		if err := db.Create(&taskRecord).Error; err != nil {
 			logger.Warnf("cron", "Failed to create task in DB: %v", err)
+		}
+		var taskResults []models.TaskResult
+		for _, client := range taskClients {
+			taskResults = append(taskResults, models.TaskResult{
+				TaskId:     taskId,
+				Client:     client,
+				Result:     "",
+				ExitCode:   nil,
+				FinishedAt: nil,
+			})
+		}
+		if len(taskResults) > 0 {
+			_ = db.Create(&taskResults).Error
 		}
 	}
 
@@ -105,7 +124,14 @@ func ExecuteCronTask(task *models.CronTask) (string, error) {
 	// 6. 离线节点登记
 	now := time.Now().UTC()
 	for _, uuid := range offlineClients {
-		_ = tasks.SaveTaskResult(taskId, uuid, "Client offline!", -1, now)
+		exitCode := -1
+		_ = db.Model(&models.TaskResult{}).
+			Where("task_id = ? AND client = ?", taskId, uuid).
+			Updates(map[string]interface{}{
+				"result":      "Client offline!",
+				"exit_code":   exitCode,
+				"finished_at": now,
+			}).Error
 	}
 
 	// 7. 更新 CronTask 记录
@@ -120,7 +146,6 @@ func ExecuteCronTask(task *models.CronTask) (string, error) {
 	task.LastResult = summary
 	task.UpdatedAt = now
 
-	db := dbcore.GetDBInstance()
 	_ = db.Save(task).Error
 
 	return taskId, nil

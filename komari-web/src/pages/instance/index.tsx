@@ -11,7 +11,7 @@ import LoadChart from "./LoadChart";
 import { DetailsGrid } from "@/components/DetailsGrid";
 import { usePublicInfo } from "@/contexts/PublicInfoContext";
 import { useIsMobile } from "@/hooks/use-mobile";
-import { useAccount } from "@/contexts/AccountContext";
+import { AccountProvider, useAccount } from "@/contexts/AccountContext";
 import { useLocation } from "react-router-dom";
 import { loginPath } from "@/utils";
 import { Lock, LogIn } from "lucide-react";

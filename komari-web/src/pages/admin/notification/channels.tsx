@@ -28,6 +28,13 @@ interface ChannelConfigurationResponse {
   data?: Record<string, unknown>;
 }
 
+const isMethodNotFoundError = (err: any) => {
+  if (!err) return false;
+  if (err.code === -32601) return true;
+  const msg = err instanceof Error ? err.message : String(err);
+  return msg.includes("-32601") || msg.includes("method not found");
+};
+
 const NotificationSettings = () => {
   const { t, i18n } = useTranslation();
   const { call } = useRPC2Call();
@@ -48,9 +55,46 @@ const NotificationSettings = () => {
     if (loading) return;
     setChannelLoading(true);
     setChannelError("");
-    call<unknown, NotificationChannel[]>("admin:listNotificationChannels")
-      .then((data) => {
-        const list = Array.isArray(data) ? data : [];
+
+    const fetchChannels = async () => {
+      try {
+        const data = await call<unknown, NotificationChannel[]>(
+          "admin:listNotificationChannels",
+        );
+        return Array.isArray(data) ? data : [];
+      } catch (err) {
+        if (isMethodNotFoundError(err)) {
+          // Backward compatibility fallback to legacy admin:getMessageSenderProvider
+          const raw = await call<unknown, Record<string, any[]>>(
+            "admin:getMessageSenderProvider",
+          );
+          if (raw && typeof raw === "object") {
+            return Object.entries(raw).map(([id, items]) => ({
+              id,
+              configuration: {
+                type: "managed",
+                name: id,
+                data: Array.isArray(items)
+                  ? items.map((it: any) => ({
+                      key: it.name,
+                      name: it.name,
+                      help: it.help,
+                      type: it.type === "option" ? "select" : it.type || "string",
+                      options: it.options,
+                      default: it.default,
+                      required: it.required,
+                    }))
+                  : [],
+              },
+            }));
+          }
+        }
+        throw err;
+      }
+    };
+
+    fetchChannels()
+      .then((list) => {
         setChannels(list);
         const selected = settings.notification_method || "";
         setCurrentChannel(selected || "none");
@@ -73,10 +117,39 @@ const NotificationSettings = () => {
     }
     setChannelLoading(true);
     setChannelError("");
-    call<{ id: string }, ChannelConfigurationResponse>(
-      "admin:getNotificationChannelConfiguration",
-      { id: currentChannel },
-    )
+
+    const fetchConfig = async () => {
+      try {
+        return await call<{ id: string }, ChannelConfigurationResponse>(
+          "admin:getNotificationChannelConfiguration",
+          { id: currentChannel },
+        );
+      } catch (err) {
+        if (isMethodNotFoundError(err)) {
+          // Backward compatibility fallback to legacy admin:getMessageSenderProvider
+          const res = await call<
+            { provider: string },
+            { name?: string; addition?: string }
+          >("admin:getMessageSenderProvider", { provider: currentChannel });
+          let parsedData: Record<string, unknown> = {};
+          if (res?.addition) {
+            try {
+              parsedData = JSON.parse(res.addition);
+            } catch {
+              parsedData = {};
+            }
+          }
+          const matched = channels.find((c) => c.id === currentChannel);
+          return {
+            configuration: matched?.configuration,
+            data: parsedData,
+          };
+        }
+        throw err;
+      }
+    };
+
+    fetchConfig()
       .then((result) => {
         setConfiguration(result?.configuration);
         setValues(result?.data || {});
@@ -86,7 +159,7 @@ const NotificationSettings = () => {
         setValues({});
       })
       .finally(() => setChannelLoading(false));
-  }, [call, currentChannel]);
+  }, [call, currentChannel, channels]);
 
   const channelOptions = useMemo(() => {
     const registered = [
@@ -136,6 +209,23 @@ const NotificationSettings = () => {
       });
       toast.success(t("common.success"));
     } catch (err) {
+      if (isMethodNotFoundError(err)) {
+        try {
+          await call("admin:setMessageSenderProvider", {
+            name: currentChannel,
+            addition: JSON.stringify(values),
+          });
+          toast.success(t("common.success"));
+          return;
+        } catch (fallbackErr) {
+          toast.error(
+            fallbackErr instanceof Error
+              ? fallbackErr.message
+              : String(fallbackErr),
+          );
+          return;
+        }
+      }
       toast.error(err instanceof Error ? err.message : String(err));
     } finally {
       setSaving(false);
@@ -148,13 +238,15 @@ const NotificationSettings = () => {
   if (error) {
     return <Text color="red">{error}</Text>;
   }
-  if (channelError) {
-    return <Text color="red">{channelError}</Text>;
-  }
 
   return (
     <>
       <SettingCardLabel>{t("settings.notification.title")}</SettingCardLabel>
+      {channelError ? (
+        <Text color="red" className="mb-2 block">
+          {channelError}
+        </Text>
+      ) : null}
       <SettingCardSwitch
         title={t("settings.notification.enable")}
         description={t("settings.notification.enable_description")}

@@ -376,7 +376,14 @@ const TwoFactorDisabled = () => {
         .then((blob) => {
           const url = URL.createObjectURL(blob);
           setQRCode(url);
-          return fetch("/api/admin/2fa/info").then(r => r.json());
+          return fetch("/api/admin/2fa/info")
+            .then((r) => {
+              if (r.ok && r.headers.get("content-type")?.includes("application/json")) {
+                return r.json();
+              }
+              return null;
+            })
+            .catch(() => null);
         })
         .then((info) => {
           if (info?.data?.pending_secret) {

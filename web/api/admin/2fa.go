@@ -21,6 +21,13 @@ func Generate2FA(c *gin.Context) {
 	png.Encode(c.Writer, img)
 }
 
+func Get2FAInfo(c *gin.Context) {
+	secret, _ := c.Cookie("2fa_secret")
+	api.RespondSuccess(c, gin.H{
+		"pending_secret": secret,
+	})
+}
+
 func Enable2FA(c *gin.Context) {
 	uuid, _ := c.Get("uuid")
 	secret, _ := c.Cookie("2fa_secret")

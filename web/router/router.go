@@ -121,8 +121,21 @@ func registerAdminRoutes(r *gin.Engine) {
 	twoFactor := g.Group("/2fa")
 	{
 		twoFactor.GET("/generate", admin.Generate2FA)
+		twoFactor.GET("/info", admin.Get2FAInfo)
 		twoFactor.POST("/enable", admin.Enable2FA)
 		twoFactor.POST("/disable", api.RequireSensitive2FA(), admin.Disable2FA)
+	}
+
+	// 定时任务 (Cron) 统一 REST 接口，敏感写操作受 2FA 保护
+	cronGroup := g.Group("/cron")
+	{
+		cronGroup.GET("", admin.ListCronTasks)
+		cronGroup.POST("", api.RequireSensitive2FA(), admin.CreateCronTask)
+		cronGroup.PUT("/:id", api.RequireSensitive2FA(), admin.UpdateCronTask)
+		cronGroup.DELETE("/:id", api.RequireSensitive2FA(), admin.DeleteCronTask)
+		cronGroup.POST("/:id/toggle", admin.ToggleCronTask)
+		cronGroup.POST("/:id/run", api.RequireSensitive2FA(), admin.RunCronTask)
+		cronGroup.GET("/:id/logs", admin.GetCronTaskLogs)
 	}
 
 	// oauth2 绑定走重定向，保留 REST handler。

@@ -46,50 +46,6 @@ func ListCronTasks(c *gin.Context) {
 		return
 	}
 
-	if len(tasks) == 0 {
-		now := time.Now().UTC()
-		t1 := now.Add(-4 * time.Hour)
-		n1 := now.Add(20 * time.Hour)
-		c1 := now.Add(-7 * 24 * time.Hour)
-		code0 := 0
-		task1 := models.CronTask{
-			Id:              "cron-1",
-			Name:            "清理系统临时缓存与日志",
-			Command:         "journalctl --vacuum-time=3d && rm -rf /tmp/*.log",
-			ScheduleType:    "preset",
-			IntervalMinutes: 1440,
-			TargetNodes:     models.StringArray{"all"},
-			Enabled:         true,
-			LastRunAt:       &t1,
-			LastExitCode:    &code0,
-			LastResult:      "Vacuumed 45.2M logs from /var/log/journal. Cleaned temporary files.",
-			NextRunAt:       &n1,
-			CreatedAt:       c1,
-			UpdatedAt:       t1,
-		}
-		t2 := now.Add(-15 * time.Minute)
-		n2 := now.Add(45 * time.Minute)
-		c2 := now.Add(-3 * 24 * time.Hour)
-		task2 := models.CronTask{
-			Id:              "cron-2",
-			Name:            "检查磁盘与分区空间告警",
-			Command:         "df -h | awk '$5 > 85 {print $0}'",
-			ScheduleType:    "preset",
-			IntervalMinutes: 60,
-			TargetNodes:     models.StringArray{"all"},
-			Enabled:         true,
-			LastRunAt:       &t2,
-			LastExitCode:    &code0,
-			LastResult:      "All filesystems within normal threshold (<85%).",
-			NextRunAt:       &n2,
-			CreatedAt:       c2,
-			UpdatedAt:       t2,
-		}
-		_ = db.Create(&task1)
-		_ = db.Create(&task2)
-		tasks = []models.CronTask{task1, task2}
-	}
-
 	c.JSON(http.StatusOK, gin.H{
 		"status":  "success",
 		"message": "",

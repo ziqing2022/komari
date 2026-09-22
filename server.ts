@@ -434,7 +434,7 @@ app.get('/api/public', (_req, res) => {
       oauth_enable: false,
       oauth_provider: '',
       metric_retention_days: 30,
-      private_site: false,
+      private_site: Boolean(appSettings.private_site),
       custom_head: '',
       custom_body: ''
     }

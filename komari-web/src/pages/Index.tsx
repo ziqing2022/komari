@@ -6,6 +6,7 @@ import {
   Popover,
   IconButton,
   Switch,
+  Button,
 } from "@radix-ui/themes";
 import { useTranslation } from "react-i18next";
 import React, { useCallback, useEffect, useMemo, Suspense } from "react";
@@ -14,9 +15,13 @@ import { formatBytes } from "@/utils/unitHelper";
 import { useLiveData } from "../contexts/LiveDataContext";
 import { useNodeList } from "@/contexts/NodeListContext";
 import Loading from "@/components/loading";
-import { Settings } from "lucide-react";
+import { Settings, Lock, LogIn, RefreshCw } from "lucide-react";
 import { useLocalStorage } from "@/hooks/useLocalStorage";
 import type { LiveData } from "@/types/LiveData";
+import { useLocation } from "react-router-dom";
+import { usePublicInfo } from "@/contexts/PublicInfoContext";
+import { useAccount } from "@/contexts/AccountContext";
+import { loginPath } from "@/utils";
 
 // Intelligent speed formatting function
 const formatSpeed = (bytes: number): string => {
@@ -48,6 +53,10 @@ type StatusCardKey = keyof typeof STATUS_CARD_VISIBILITY_DEFAULTS;
 
 const Index = () => {
   const [t] = useTranslation();
+  const location = useLocation();
+  const { publicInfo } = usePublicInfo();
+  const { account, loading: accountLoading } = useAccount();
+  const loginRedirect = loginPath(location.pathname, location.search);
   const { live_data } = useLiveData();
   const { nodeList, isLoading, error, refresh } = useNodeList();
   const liveData = live_data?.data ?? EMPTY_LIVE_DATA;
@@ -58,6 +67,27 @@ const Index = () => {
   const [statusCardsVisibility, setStatusCardsVisibility] = useLocalStorage<
     Record<StatusCardKey, boolean>
   >("statusCardsVisibility", STATUS_CARD_VISIBILITY_DEFAULTS);
+
+  const isAuthRequired = useMemo(() => {
+    // 1. 如果配置明确为私有站点且未登录
+    if (publicInfo?.private_site && !accountLoading && !account?.logged_in) {
+      return true;
+    }
+    // 2. 如果请求返回 401 或提示私有站点/未登录
+    if (error) {
+      const errStr = String(error).toLowerCase();
+      if (
+        errStr.includes("401") ||
+        errStr.includes("private site") ||
+        errStr.includes("login first") ||
+        errStr.includes("permission denied") ||
+        publicInfo?.private_site
+      ) {
+        return true;
+      }
+    }
+    return false;
+  }, [publicInfo?.private_site, accountLoading, account?.logged_in, error]);
 
   const summaryStats = useMemo(() => {
     const regions = new Set<string>();
@@ -146,31 +176,83 @@ const Index = () => {
       }
     };
     const startPolling = () => {
-      if (interval === undefined && !document.hidden) {
+      if (interval === undefined && !document.hidden && !isAuthRequired) {
         interval = window.setInterval(refresh, 5000);
       }
     };
     const handleVisibilityChange = () => {
       stopPolling();
-      if (!document.hidden) {
+      if (!document.hidden && !isAuthRequired) {
         refresh();
         startPolling();
       }
     };
 
     document.addEventListener("visibilitychange", handleVisibilityChange);
-    startPolling();
+    if (!isAuthRequired) {
+      startPolling();
+    }
     return () => {
       stopPolling();
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
-  }, [refresh]);
+  }, [refresh, isAuthRequired]);
+
+  if (isAuthRequired) {
+    return (
+      <div className="flex justify-center items-center py-16 px-4">
+        <Card className="max-w-md w-full p-8 text-center shadow-lg border rounded-2xl">
+          <Flex direction="column" align="center" gap="4">
+            <div className="w-16 h-16 rounded-full bg-accent-3 flex items-center justify-center text-accent-11">
+              <Lock size={32} />
+            </div>
+            <div className="space-y-1">
+              <Text as="div" size="5" weight="bold">
+                {publicInfo?.sitename || "Komari"}
+              </Text>
+              <Text as="div" size="3" color="gray" className="mt-2 text-muted-foreground">
+                {t("private_site", "这是一个私有的Komari站点，请先登录。")}
+              </Text>
+            </div>
+            <Button
+              size="3"
+              className="w-full mt-2 cursor-pointer flex items-center justify-center gap-2"
+              onClick={() => {
+                window.location.href = loginRedirect;
+              }}
+            >
+              <LogIn size={18} />
+              {t("login.title", "登录")}
+            </Button>
+          </Flex>
+        </Card>
+      </div>
+    );
+  }
 
   if (isLoading) {
     return <Loading />;
   }
+
   if (error) {
-    return <div>Error: {error}</div>;
+    return (
+      <div className="flex justify-center items-center py-16 px-4">
+        <Card className="max-w-md w-full p-6 text-center border rounded-xl">
+          <Flex direction="column" align="center" gap="3">
+            <Text as="div" size="4" weight="bold" color="red">
+              {t("common.error", "出错了")}
+            </Text>
+            <Text as="div" size="2" color="gray">
+              {error}
+            </Text>
+            <Button variant="soft" onClick={refresh} className="cursor-pointer">
+              <RefreshCw size={16} />
+              {t("retry", "重试")}
+            </Button>
+          </Flex>
+        </Card>
+      </div>
+    );
   }
 
   return (

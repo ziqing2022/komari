@@ -4,23 +4,29 @@ import { useLiveData } from "../../contexts/LiveDataContext";
 import { useTranslation } from "react-i18next";
 import type { Record } from "../../types/LiveData";
 import Flag from "../../components/Flag";
-import { Card, Flex, Text } from "@radix-ui/themes";
+import { Card, Flex, Text, Button } from "@radix-ui/themes";
 import { useNodeList } from "@/contexts/NodeListContext";
 import { liveDataToRecords } from "@/utils/RecordHelper";
 import LoadChart from "./LoadChart";
 import { DetailsGrid } from "@/components/DetailsGrid";
 import { usePublicInfo } from "@/contexts/PublicInfoContext";
 import { useIsMobile } from "@/hooks/use-mobile";
-import { AccountProvider } from "@/contexts/AccountContext";
+import { useAccount } from "@/contexts/AccountContext";
+import { useLocation } from "react-router-dom";
+import { loginPath } from "@/utils";
+import { Lock, LogIn } from "lucide-react";
 
 export default function InstancePage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  const location = useLocation();
   const { onRefresh, live_data } = useLiveData();
   const { uuid } = useParams<{ uuid: string }>();
   const [recent, setRecent] = useState<Record[]>([]);
   const [chartRealtimeActive, setChartRealtimeActive] = useState(true);
   const { nodeList } = useNodeList();
+  const { account, loading: accountLoading } = useAccount();
+  const loginRedirect = loginPath(location.pathname, location.search);
   const length = 30 * 5;
   // #region 初始数据加载
   const node = nodeList?.find((n) => n.uuid === uuid);
@@ -151,6 +157,39 @@ export default function InstancePage() {
     // 清理订阅
     return unsubscribe;
   }, [chartRealtimeActive, length, onRefresh, uuid]);
+
+  if (publicInfo?.private_site && !accountLoading && !account?.logged_in) {
+    return (
+      <div className="flex justify-center items-center py-16 px-4">
+        <Card className="max-w-md w-full p-8 text-center shadow-lg border rounded-2xl">
+          <Flex direction="column" align="center" gap="4">
+            <div className="w-16 h-16 rounded-full bg-accent-3 flex items-center justify-center text-accent-11">
+              <Lock size={32} />
+            </div>
+            <div className="space-y-1">
+              <Text as="div" size="5" weight="bold">
+                {publicInfo?.sitename || "Komari"}
+              </Text>
+              <Text as="div" size="3" color="gray" className="mt-2 text-muted-foreground">
+                {t("private_site", "这是一个私有的Komari站点，请先登录。")}
+              </Text>
+            </div>
+            <Button
+              size="3"
+              className="w-full mt-2 cursor-pointer flex items-center justify-center gap-2"
+              onClick={() => {
+                window.location.href = loginRedirect;
+              }}
+            >
+              <LogIn size={18} />
+              {t("login.title", "登录")}
+            </Button>
+          </Flex>
+        </Card>
+      </div>
+    );
+  }
+
   // #region 布局
   return (
     <div className="km-page-instance flex flex-row justify-center p-4 gap-4">

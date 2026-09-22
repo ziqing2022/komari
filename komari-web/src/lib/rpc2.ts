@@ -282,7 +282,18 @@ export class RPC2Client {
       });
 
       if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        let errorMsg = `HTTP ${response.status}${response.statusText ? ": " + response.statusText : ""}`;
+        try {
+          const jsonErr = await response.clone().json();
+          if (jsonErr?.message) {
+            errorMsg = jsonErr.message;
+          }
+        } catch {
+          // ignore parsing error
+        }
+        const httpError: any = new Error(errorMsg);
+        httpError.status = response.status;
+        throw httpError;
       }
 
       if (options.notification) {
@@ -331,7 +342,18 @@ export class RPC2Client {
       });
 
       if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        let errorMsg = `HTTP ${response.status}${response.statusText ? ": " + response.statusText : ""}`;
+        try {
+          const jsonErr = await response.clone().json();
+          if (jsonErr?.message) {
+            errorMsg = jsonErr.message;
+          }
+        } catch {
+          // ignore parsing error
+        }
+        const httpError: any = new Error(errorMsg);
+        httpError.status = response.status;
+        throw httpError;
       }
 
       const jsonResponse: JSONRPC2BatchResponse = await response.json();

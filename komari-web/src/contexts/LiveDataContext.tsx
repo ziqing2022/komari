@@ -158,16 +158,17 @@ export const LiveDataProvider: React.FC<{ children: React.ReactNode }> = ({
       }
     };
 
-    const scheduleNext = () => {
+    const scheduleNext = (delay = LIVE_DATA_INTERVAL_MS) => {
       clearTimer();
       if (!stopped && !document.hidden) {
-        timer = window.setTimeout(fetchLatest, LIVE_DATA_INTERVAL_MS);
+        timer = window.setTimeout(fetchLatest, delay);
       }
     };
 
     const fetchLatest = async () => {
       if (running || stopped || document.hidden) return;
       running = true;
+      let nextDelay = LIVE_DATA_INTERVAL_MS;
       try {
         // 策略由 RPC2Client 内部实现
         const result: Record<string, any> = await call(
@@ -181,13 +182,23 @@ export const LiveDataProvider: React.FC<{ children: React.ReactNode }> = ({
           notifyRefreshCallbacks(live);
         }
         setShowCallout(true);
-      } catch (e) {
+      } catch (e: any) {
         if (stopped) return;
-        console.error("RPC2 获取最新状态失败:", e);
+        const isAuthError =
+          e?.status === 401 ||
+          String(e?.message).includes("401") ||
+          String(e?.message).toLowerCase().includes("private site") ||
+          String(e?.message).toLowerCase().includes("login first");
+        if (!isAuthError) {
+          console.error("RPC2 获取最新状态失败:", e);
+        }
         setShowCallout(false);
+        if (isAuthError) {
+          nextDelay = 10000;
+        }
       } finally {
         running = false;
-        scheduleNext();
+        scheduleNext(nextDelay);
       }
     };
 

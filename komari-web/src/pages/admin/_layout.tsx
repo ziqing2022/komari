@@ -12,7 +12,7 @@ import { normalizeLanguage, readStoredLanguage } from "@/utils/language";
 import { useTranslation } from "react-i18next";
 import { useAccount } from "@/contexts/AccountContext";
 import Loading from "@/components/loading";
-import { loginPath, resolveLoginRedirect } from "@/utils/loginRedirect";
+import { loginPath, resolveLoginRedirect } from "@/utils";
 
 const AdminLayout = () => {
   const { t, i18n } = useTranslation();

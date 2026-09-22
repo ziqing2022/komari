@@ -8,7 +8,7 @@ import { LogIn } from "lucide-react";
 import { Link, useLocation } from "react-router-dom";
 import { usePublicInfo } from "@/contexts/PublicInfoContext";
 import { useTranslation } from "react-i18next";
-import { loginPath } from "@/utils/loginRedirect";
+import { loginPath } from "@/utils";
 const NavBar = () => {
   const { publicInfo } = usePublicInfo();
   const { t } = useTranslation();

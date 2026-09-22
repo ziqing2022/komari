@@ -9,7 +9,7 @@ import ColorSwitch from "@/components/ColorSwitch";
 import { AccountProvider, useAccount } from "@/contexts/AccountContext";
 import { usePublicInfo } from "@/contexts/PublicInfoContext";
 import Loading from "@/components/loading";
-import { resolveLoginRedirect } from "@/utils/loginRedirect";
+import { resolveLoginRedirect } from "@/utils";
 
 type LoginResponse = {
   message?: string;

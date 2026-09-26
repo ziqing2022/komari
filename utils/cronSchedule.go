@@ -146,6 +146,16 @@ func ExecuteCronTask(task *models.CronTask) (string, error) {
 	task.LastResult = summary
 	task.UpdatedAt = now
 
+	// 任务执行后，根据配置的周期自动推算并更新下次调度时间，避免时间倒挂与滞后
+	if task.Enabled {
+		interval := task.IntervalMinutes
+		if interval <= 0 {
+			interval = 30
+		}
+		nextRun := now.Add(time.Duration(interval) * time.Minute)
+		task.NextRunAt = &nextRun
+	}
+
 	_ = db.Save(task).Error
 
 	return taskId, nil

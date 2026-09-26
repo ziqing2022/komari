@@ -160,6 +160,26 @@ const CronContent = () => {
     },
   ];
 
+  const sanitizeTaskNextRun = (task: CronTask): CronTask => {
+    if (!task.enabled) {
+      return { ...task, next_run_at: null };
+    }
+    const now = Date.now();
+    const lastTime = task.last_run_at ? new Date(task.last_run_at).getTime() : 0;
+    const nextTime = task.next_run_at ? new Date(task.next_run_at).getTime() : 0;
+    const intervalMs = Math.max(1, Number(task.interval_minutes) || 30) * 60 * 1000;
+
+    // 校准无效、时间倒挂（下次调度早于等于上次执行）或已过期的下次调度时间
+    if (!nextTime || isNaN(nextTime) || nextTime <= lastTime || nextTime <= now) {
+      let candidate = (lastTime > 0 && !isNaN(lastTime)) ? lastTime + intervalMs : now + intervalMs;
+      while (candidate <= now) {
+        candidate += intervalMs;
+      }
+      return { ...task, next_run_at: new Date(candidate).toISOString() };
+    }
+    return task;
+  };
+
   // Fetch Tasks with robust API and localStorage sync
   const loadTasks = async () => {
     setLoading(true);
@@ -177,8 +197,9 @@ const CronContent = () => {
         }
 
         if (loadedTasks !== null) {
-          setTasks(loadedTasks);
-          localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(loadedTasks));
+          const calibratedTasks = loadedTasks.map(sanitizeTaskNextRun);
+          setTasks(calibratedTasks);
+          localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(calibratedTasks));
           localStorage.setItem(LOCAL_STORAGE_INIT_KEY, "true");
           return;
         }
@@ -196,7 +217,8 @@ const CronContent = () => {
       if (saved !== null) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed)) {
-          setTasks(parsed);
+          const calibratedTasks = parsed.map(sanitizeTaskNextRun);
+          setTasks(calibratedTasks);
           return;
         }
       }
@@ -209,7 +231,7 @@ const CronContent = () => {
     }
 
     // First-time visit fallback only
-    const initial = getDefaultTasks();
+    const initial = getDefaultTasks().map(sanitizeTaskNextRun);
     setTasks(initial);
     localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(initial));
     localStorage.setItem(LOCAL_STORAGE_INIT_KEY, "true");
@@ -264,20 +286,32 @@ const CronContent = () => {
       return;
     }
 
+    const isEnabled = formEnabled;
+    const intervalMins = Number(formIntervalMinutes) || 30;
+    const now = Date.now();
+    let computedNextRun: string | null = null;
+    if (isEnabled) {
+      if (editingTask?.next_run_at && new Date(editingTask.next_run_at).getTime() > now && editingTask.interval_minutes === intervalMins) {
+        computedNextRun = editingTask.next_run_at;
+      } else {
+        computedNextRun = new Date(now + intervalMins * 60 * 1000).toISOString();
+      }
+    }
+
     setSaving(true);
     const updatedItem: CronTask = {
       id: editingTask ? editingTask.id : `cron-${Date.now()}`,
       name: formName.trim(),
       command: formCommand.trim(),
       schedule_type: formScheduleType,
-      interval_minutes: formIntervalMinutes,
+      interval_minutes: intervalMins,
       cron_expression: formScheduleType === "cron" ? formCronExpr : undefined,
       target_nodes: formTargetNodes,
-      enabled: formEnabled,
+      enabled: isEnabled,
       last_run_at: editingTask ? editingTask.last_run_at : null,
       last_exit_code: editingTask ? editingTask.last_exit_code : null,
       last_result: editingTask ? editingTask.last_result : null,
-      next_run_at: new Date(Date.now() + formIntervalMinutes * 60 * 1000).toISOString(),
+      next_run_at: computedNextRun,
       created_at: editingTask ? editingTask.created_at : new Date().toISOString(),
       updated_at: new Date().toISOString(),
     };
@@ -310,7 +344,8 @@ const CronContent = () => {
       }
 
       const resData = await res.json().catch(() => ({}));
-      const savedTask: CronTask = resData.task || resData.data?.task || resData.data || updatedItem;
+      const rawSavedTask: CronTask = resData.task || resData.data?.task || resData.data || updatedItem;
+      const savedTask: CronTask = sanitizeTaskNextRun(rawSavedTask);
 
       setTasks((prev) => {
         const nextTasks = editingTask
@@ -351,9 +386,23 @@ const CronContent = () => {
         throw new Error(err.message || "更新状态失败");
       }
       setTasks((prev) => {
-        const updated = prev.map((item) =>
-          item.id === targetId ? { ...item, enabled: nextStatus, updated_at: new Date().toISOString() } : item
-        );
+        const now = Date.now();
+        const updated = prev.map((item) => {
+          if (item.id !== targetId) return item;
+          const intervalMs = Math.max(1, Number(item.interval_minutes) || 30) * 60 * 1000;
+          let nextRun = item.next_run_at;
+          if (!nextStatus) {
+            nextRun = null;
+          } else if (!nextRun || new Date(nextRun).getTime() <= now) {
+            nextRun = new Date(now + intervalMs).toISOString();
+          }
+          return {
+            ...item,
+            enabled: nextStatus,
+            next_run_at: nextRun,
+            updated_at: new Date().toISOString()
+          };
+        });
         localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(updated));
         localStorage.setItem(LOCAL_STORAGE_INIT_KEY, "true");
         return updated;
@@ -408,17 +457,20 @@ const CronContent = () => {
       const updatedTask = resJson.task || resJson.data?.task || resJson.data;
 
       setTasks((prev) => {
-        const updated = prev.map((item) =>
-          item.id === targetId
-            ? {
-                ...item,
-                last_run_at: updatedTask?.last_run_at || new Date().toISOString(),
-                last_exit_code: updatedTask?.last_exit_code ?? 0,
-                last_result: updatedTask?.last_result || `[Manual Execution at ${new Date().toLocaleTimeString()}] Exit code: 0`,
-                updated_at: new Date().toISOString(),
-              }
-            : item
-        );
+        const now = new Date();
+        const updated = prev.map((item) => {
+          if (item.id !== targetId) return item;
+          const intervalMs = Math.max(1, Number(item.interval_minutes) || 30) * 60 * 1000;
+          const nextRunAt = updatedTask?.next_run_at || (item.enabled ? new Date(now.getTime() + intervalMs).toISOString() : null);
+          return {
+            ...item,
+            last_run_at: updatedTask?.last_run_at || now.toISOString(),
+            last_exit_code: updatedTask?.last_exit_code ?? 0,
+            last_result: updatedTask?.last_result || `[Manual Execution at ${now.toLocaleTimeString()}] Exit code: 0`,
+            next_run_at: nextRunAt,
+            updated_at: now.toISOString(),
+          };
+        });
         localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(updated));
         return updated;
       });

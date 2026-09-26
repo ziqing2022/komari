@@ -46,6 +46,22 @@ func ListCronTasks(c *gin.Context) {
 		return
 	}
 
+	now := time.Now().UTC()
+	for i := range tasks {
+		if tasks[i].Enabled {
+			interval := tasks[i].IntervalMinutes
+			if interval <= 0 {
+				interval = 30
+			}
+			// 自动校准滞后或异常倒挂的下次调度时间
+			if tasks[i].NextRunAt == nil || tasks[i].NextRunAt.Before(now) || (tasks[i].LastRunAt != nil && !tasks[i].NextRunAt.After(*tasks[i].LastRunAt)) {
+				nextRun := now.Add(time.Duration(interval) * time.Minute)
+				tasks[i].NextRunAt = &nextRun
+				_ = db.Model(&tasks[i]).Update("next_run_at", nextRun).Error
+			}
+		}
+	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"status":  "success",
 		"message": "",
@@ -191,6 +207,19 @@ func UpdateCronTask(c *gin.Context) {
 		if input.Enabled != nil {
 			task.Enabled = *input.Enabled
 		}
+		if task.Enabled {
+			now := time.Now().UTC()
+			interval := task.IntervalMinutes
+			if interval <= 0 {
+				interval = 30
+			}
+			if task.NextRunAt == nil || task.NextRunAt.Before(now) || (task.LastRunAt != nil && !task.NextRunAt.After(*task.LastRunAt)) {
+				nextRun := now.Add(time.Duration(interval) * time.Minute)
+				task.NextRunAt = &nextRun
+			}
+		} else {
+			task.NextRunAt = nil
+		}
 		task.UpdatedAt = time.Now().UTC()
 
 		if err := db.Save(task).Error; err != nil {
@@ -260,6 +289,19 @@ func ToggleCronTask(c *gin.Context) {
 		task.Enabled = *body.Enabled
 	} else {
 		task.Enabled = !task.Enabled
+	}
+	if task.Enabled {
+		now := time.Now().UTC()
+		interval := task.IntervalMinutes
+		if interval <= 0 {
+			interval = 30
+		}
+		if task.NextRunAt == nil || task.NextRunAt.Before(now) || (task.LastRunAt != nil && !task.NextRunAt.After(*task.LastRunAt)) {
+			nextRun := now.Add(time.Duration(interval) * time.Minute)
+			task.NextRunAt = &nextRun
+		}
+	} else {
+		task.NextRunAt = nil
 	}
 	task.UpdatedAt = time.Now().UTC()
 

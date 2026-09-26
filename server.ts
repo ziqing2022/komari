@@ -736,13 +736,54 @@ const initialCronTasks: CronTaskItem[] = [
   }
 ];
 
+function computeNextRunTime(task: Partial<CronTaskItem>, referenceTime: Date = new Date()): string | null {
+  if (task.enabled === false) return null;
+  const intervalMinutes = Math.max(1, Number(task.interval_minutes) || 30);
+  const intervalMs = intervalMinutes * 60 * 1000;
+  return new Date(referenceTime.getTime() + intervalMs).toISOString();
+}
+
+function ensureValidNextRunAt(task: CronTaskItem, now: Date = new Date()): CronTaskItem {
+  if (!task.enabled) {
+    return task;
+  }
+  const intervalMinutes = Math.max(1, Number(task.interval_minutes) || 30);
+  const intervalMs = intervalMinutes * 60 * 1000;
+  const nowMs = now.getTime();
+  const lastMs = task.last_run_at ? new Date(task.last_run_at).getTime() : 0;
+  const nextMs = task.next_run_at ? new Date(task.next_run_at).getTime() : 0;
+
+  // Invalid condition: missing, NaN, earlier than or equal to last_run_at, or in the past (<= now)
+  if (!nextMs || isNaN(nextMs) || nextMs <= lastMs || nextMs <= nowMs) {
+    let nextCandidate = (lastMs > 0 && !isNaN(lastMs)) ? lastMs + intervalMs : nowMs + intervalMs;
+    while (nextCandidate <= nowMs) {
+      nextCandidate += intervalMs;
+    }
+    task.next_run_at = new Date(nextCandidate).toISOString();
+  }
+  return task;
+}
+
 function loadCronTasks(): CronTaskItem[] {
   try {
     if (fs.existsSync(cronFilePath)) {
       const content = fs.readFileSync(cronFilePath, 'utf-8');
       const data = JSON.parse(content);
       if (Array.isArray(data)) {
-        return data;
+        let changed = false;
+        const now = new Date();
+        const calibrated = data.map((t: CronTaskItem) => {
+          const originalNext = t.next_run_at;
+          const fixed = ensureValidNextRunAt(t, now);
+          if (fixed.next_run_at !== originalNext) {
+            changed = true;
+          }
+          return fixed;
+        });
+        if (changed) {
+          saveCronTasks(calibrated);
+        }
+        return calibrated;
       }
     }
   } catch (e) {
@@ -788,19 +829,21 @@ app.post('/api/admin/cron', requireSensitive2FA, (req, res) => {
   if (!name || !command) {
     return res.status(400).json({ status: 'error', message: 'Task name and command are required.' });
   }
+  const isEnabled = enabled !== false;
+  const intervalMins = Number(interval_minutes) || 30;
   const newTask: CronTaskItem = {
     id: req.body.id || `cron-${Date.now()}`,
     name,
     command,
     schedule_type: schedule_type || 'preset',
-    interval_minutes: Number(interval_minutes) || 30,
+    interval_minutes: intervalMins,
     cron_expression,
     target_nodes: Array.isArray(target_nodes) ? target_nodes : ['all'],
-    enabled: enabled !== false,
+    enabled: isEnabled,
     last_run_at: null,
     last_exit_code: null,
     last_result: null,
-    next_run_at: new Date(Date.now() + (Number(interval_minutes) || 30) * 60 * 1000).toISOString(),
+    next_run_at: isEnabled ? computeNextRunTime({ interval_minutes: intervalMins, enabled: true }) : null,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
   };
@@ -821,19 +864,21 @@ app.put('/api/admin/cron/:id', requireSensitive2FA, (req, res) => {
 
   if (idx === -1) {
     // If not found in existing list, create or append with this id
+    const isEnabled = bodyData.enabled !== undefined ? Boolean(bodyData.enabled) : true;
+    const intervalMins = Number(bodyData.interval_minutes) || 30;
     const newTask: CronTaskItem = {
       id: String(id),
       name: bodyData.name || '新定时任务',
       command: bodyData.command || 'echo hello',
       schedule_type: bodyData.schedule_type || 'preset',
-      interval_minutes: Number(bodyData.interval_minutes) || 30,
+      interval_minutes: intervalMins,
       cron_expression: bodyData.cron_expression,
       target_nodes: Array.isArray(bodyData.target_nodes) ? bodyData.target_nodes : ['all'],
-      enabled: bodyData.enabled !== undefined ? Boolean(bodyData.enabled) : true,
+      enabled: isEnabled,
       last_run_at: null,
       last_exit_code: null,
       last_result: null,
-      next_run_at: new Date(Date.now() + (Number(bodyData.interval_minutes) || 30) * 60 * 1000).toISOString(),
+      next_run_at: isEnabled ? computeNextRunTime({ interval_minutes: intervalMins, enabled: true }) : null,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
       ...bodyData,
@@ -843,10 +888,22 @@ app.put('/api/admin/cron/:id', requireSensitive2FA, (req, res) => {
     return res.json({ status: 'success', task: newTask, data: newTask });
   }
 
+  const isEnabled = bodyData.enabled !== undefined ? Boolean(bodyData.enabled) : cronTasksList[idx].enabled;
+  const intervalMinutes = Number(bodyData.interval_minutes) || cronTasksList[idx].interval_minutes || 30;
+  let nextRunAt = cronTasksList[idx].next_run_at;
+  if (!isEnabled) {
+    nextRunAt = null;
+  } else if (!nextRunAt || new Date(nextRunAt).getTime() <= Date.now() || bodyData.interval_minutes !== undefined) {
+    nextRunAt = computeNextRunTime({ interval_minutes: intervalMinutes, enabled: true });
+  }
+
   cronTasksList[idx] = {
     ...cronTasksList[idx],
     ...bodyData,
     id: cronTasksList[idx].id, // preserve existing id
+    enabled: isEnabled,
+    interval_minutes: intervalMinutes,
+    next_run_at: nextRunAt,
     updated_at: new Date().toISOString()
   };
   saveCronTasks(cronTasksList);
@@ -868,10 +925,15 @@ app.post('/api/admin/cron/:id/toggle', (req, res) => {
   if (!task) {
     return res.status(404).json({ status: 'error', message: 'Task not found' });
   }
-  task.enabled = req.body.enabled !== undefined ? req.body.enabled : !task.enabled;
+  task.enabled = req.body.enabled !== undefined ? Boolean(req.body.enabled) : !task.enabled;
+  if (task.enabled) {
+    task.next_run_at = computeNextRunTime(task);
+  } else {
+    task.next_run_at = null;
+  }
   task.updated_at = new Date().toISOString();
   saveCronTasks(cronTasksList);
-  res.json({ status: 'success', enabled: task.enabled, data: { enabled: task.enabled } });
+  res.json({ status: 'success', enabled: task.enabled, task, data: { enabled: task.enabled, task } });
 });
 
 const cronLogsFilePath = path.join(process.cwd(), 'komari-web', 'cron-logs.json');
@@ -902,9 +964,14 @@ app.post('/api/admin/cron/:id/run', requireSensitive2FA, (req, res) => {
   if (!task) {
     return res.status(404).json({ status: 'error', message: 'Task not found' });
   }
-  const now = new Date().toISOString();
-  task.last_run_at = now;
-  task.updated_at = now;
+  const now = new Date();
+  const nowIso = now.toISOString();
+  task.last_run_at = nowIso;
+  task.updated_at = nowIso;
+  if (task.enabled) {
+    task.next_run_at = computeNextRunTime(task, now);
+  }
+  saveCronTasks(cronTasksList);
 
   exec(task.command, { timeout: 15000 }, (error, stdout, stderr) => {
     const finishedAt = new Date().toISOString();

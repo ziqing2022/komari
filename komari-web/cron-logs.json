@@ -1,0 +1,17 @@
+{
+  "cron-1790007307641": [
+    {
+      "id": "log-1790076052703",
+      "task_id": "cron-1790007307641",
+      "task_name": "测试任务1",
+      "node_name": "Local Server Agent",
+      "triggered_at": "2026-09-22T11:20:52.666Z",
+      "start_time": "2026-09-22T11:20:52.666Z",
+      "finished_at": "2026-09-22T11:20:52.703Z",
+      "end_time": "2026-09-22T11:20:52.703Z",
+      "exit_code": 0,
+      "output": "11:20:52 up 13 min,  0 users,  load average: 0.00, 0.00, 0.00",
+      "target_nodes_count": 1
+    }
+  ]
+}

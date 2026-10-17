@@ -1,0 +1,20 @@
+[
+  {
+    "id": 1,
+    "name": "系统信息速查",
+    "text": "uname -a && uptime && free -h && df -h",
+    "remark": "常用系统硬件与负载快速概览",
+    "weight": 10,
+    "createdAt": "2026-10-16T09:02:40.347Z",
+    "updatedAt": "2026-10-16T09:02:40.347Z"
+  },
+  {
+    "id": 2,
+    "name": "查看 Komari 运行日志",
+    "text": "journalctl -u komari -n 50 --no-pager",
+    "remark": "快速定位主控端服务日志",
+    "weight": 5,
+    "createdAt": "2026-10-16T09:02:40.347Z",
+    "updatedAt": "2026-10-16T09:02:40.347Z"
+  }
+]

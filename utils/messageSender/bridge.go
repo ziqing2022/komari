@@ -44,7 +44,6 @@ func (a *factoryChannelAdapter) Unload() error {
 
 // RegisterFactoryChannels 将通过 factory 注册的自定义渠道适配并接入到 1.6.0 的 notificationChannels 注册中心
 func RegisterFactoryChannels() {
-	All() // 确保全部 sender 包被导入
 	for name, sender := range factory.GetAllMessageSenders() {
 		if strings.EqualFold(name, "webhook") || strings.EqualFold(name, "javascript") {
 			continue // webhook 和 javascript 已由 1.6.0 原生实现处理

@@ -12,6 +12,13 @@ import (
 	"github.com/komari-monitor/komari/utils/messageSender"
 	"github.com/komari-monitor/komari/utils/messageSender/javascript"
 	"github.com/komari-monitor/komari/utils/messageSender/webhook"
+
+	_ "github.com/komari-monitor/komari/utils/messageSender/bark"
+	_ "github.com/komari-monitor/komari/utils/messageSender/email"
+	_ "github.com/komari-monitor/komari/utils/messageSender/empty"
+	_ "github.com/komari-monitor/komari/utils/messageSender/serverchan3"
+	_ "github.com/komari-monitor/komari/utils/messageSender/serverchanturbo"
+	_ "github.com/komari-monitor/komari/utils/messageSender/telegram"
 )
 
 // Initialize registers the built-in channels and seeds their defaults.

@@ -552,21 +552,46 @@ const CronContent = () => {
     }
   };
 
-  // View Logs
+  // View Logs: Instant Optimistic Rendering + Background Sync
   const handleViewLogs = async (task: CronTask) => {
     setLogsTaskName(task.name);
     setLogsDialogOpen(true);
-    setLoadingLogs(true);
+
+    // 1. 毫秒级即时回显：若任务已有上次执行结果，立即组装首条记录秒级展示，避免用户等待转圈
+    if (task.last_run_at || task.last_result) {
+      setSelectedTaskLogs([
+        {
+          id: `log-${task.id}-instant`,
+          task_id: task.id,
+          task_name: task.name,
+          triggered_at: task.last_run_at || new Date().toISOString(),
+          start_time: task.last_run_at || new Date().toISOString(),
+          finished_at: task.last_run_at || new Date().toISOString(),
+          exit_code: task.last_exit_code ?? 0,
+          output: task.last_result || "任务已触发完成",
+          target_nodes_count: task.target_nodes.includes("all")
+            ? (nodeDetail?.length || 1)
+            : task.target_nodes.length,
+        },
+      ]);
+      setLoadingLogs(false);
+    } else {
+      setSelectedTaskLogs([]);
+      setLoadingLogs(true);
+    }
+
+    // 2. 异步静默拉取完整历史记录，拉取成功后平滑刷新
     try {
       const res = await fetch(`/api/admin/cron/${task.id}/logs`);
       if (res.ok) {
         const json = await res.json();
-        setSelectedTaskLogs(json?.logs || []);
-      } else {
-        setSelectedTaskLogs(getMockLogs(task));
+        const logs = Array.isArray(json?.logs) ? json.logs : Array.isArray(json?.data) ? json.data : [];
+        if (logs.length > 0) {
+          setSelectedTaskLogs(logs);
+        }
       }
     } catch {
-      setSelectedTaskLogs(getMockLogs(task));
+      // 保留即时回显数据，无需报错中断
     } finally {
       setLoadingLogs(false);
     }

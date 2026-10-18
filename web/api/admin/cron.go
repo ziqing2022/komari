@@ -366,13 +366,13 @@ func GetCronTaskLogs(c *gin.Context) {
 	db := dbcore.GetDBInstance()
 	var results []models.TaskResult
 	prefix := fmt.Sprintf("cron-%s-%%", task.Id)
-	bareID := strings.TrimPrefix(strings.TrimPrefix(task.Id, "cron-"), "task-")
-	altPrefix := fmt.Sprintf("cron-%s-%%", bareID)
 
-	_ = db.Preload("ClientInfo").
-		Where("task_id LIKE ? OR task_id LIKE ? OR task_id = ?", prefix, altPrefix, task.Id).
+	// 高效索引查询：优先匹配精确前缀，仅拉取必要字段
+	_ = db.Select("task_id", "client", "result", "exit_code", "finished_at", "created_at").
+		Preload("ClientInfo").
+		Where("task_id LIKE ? OR task_id = ?", prefix, task.Id).
 		Order("created_at desc").
-		Limit(50).
+		Limit(30).
 		Find(&results).Error
 
 	var logs []gin.H

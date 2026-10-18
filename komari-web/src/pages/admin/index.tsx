@@ -2561,6 +2561,7 @@ function DetailView({ node }: { node: NodeDetail }) {
   const isMobile = useIsMobile();
   const { live_data } = useLiveData();
   const isOnline = Boolean(
+    (node as any)?.online ||
     live_data?.data?.online?.some(
       (id) => id === node.uuid || id?.toLowerCase() === node.uuid?.toLowerCase()
     )

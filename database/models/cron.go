@@ -12,6 +12,7 @@ type CronTask struct {
 	CronExpression  string      `json:"cron_expression,omitempty" gorm:"type:varchar(128)"`
 	TargetNodes     StringArray `json:"target_nodes" gorm:"type:longtext"`
 	Enabled         bool        `json:"enabled" gorm:"not null;default:true"`
+	NotifyOnFailure bool        `json:"notify_on_failure" gorm:"not null;default:false"`
 	LastRunAt       *time.Time  `json:"last_run_at,omitempty"`
 	LastExitCode    *int        `json:"last_exit_code,omitempty" gorm:"type:int"`
 	LastResult      string      `json:"last_result,omitempty" gorm:"type:longtext"`

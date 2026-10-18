@@ -25,6 +25,8 @@ import {
   ShieldCheck,
   RefreshCw,
   Terminal,
+  Copy,
+  Bell,
 } from "lucide-react";
 import { toast } from "sonner";
 import { NodeDetailsProvider, useNodeDetails } from "@/contexts/NodeDetailsContext";
@@ -40,6 +42,7 @@ export interface CronTask {
   cron_expression?: string;
   target_nodes: string[]; // empty or ["all"] means all nodes
   enabled: boolean;
+  notify_on_failure?: boolean;
   last_run_at: string | null;
   last_exit_code: number | null;
   last_result: string | null;
@@ -90,6 +93,7 @@ const CronContent = () => {
   const [formCronExpr, setFormCronExpr] = useState("0 * * * *");
   const [formTargetNodes, setFormTargetNodes] = useState<string[]>([]);
   const [formEnabled, setFormEnabled] = useState(true);
+  const [formNotifyOnFailure, setFormNotifyOnFailure] = useState(false);
   const [form2FaCode, setForm2FaCode] = useState("");
   const [saving, setSaving] = useState(false);
 
@@ -251,6 +255,7 @@ const CronContent = () => {
     setFormCronExpr("0 * * * *");
     setFormTargetNodes(["all"]);
     setFormEnabled(true);
+    setFormNotifyOnFailure(false);
     setForm2FaCode("");
     setEditDialogOpen(true);
   };
@@ -265,6 +270,7 @@ const CronContent = () => {
     setFormCronExpr(task.cron_expression || "0 * * * *");
     setFormTargetNodes(task.target_nodes.length ? task.target_nodes : ["all"]);
     setFormEnabled(task.enabled);
+    setFormNotifyOnFailure(Boolean(task.notify_on_failure));
     setForm2FaCode("");
     setEditDialogOpen(true);
   };
@@ -308,6 +314,7 @@ const CronContent = () => {
       cron_expression: formScheduleType === "cron" ? formCronExpr : undefined,
       target_nodes: formTargetNodes,
       enabled: isEnabled,
+      notify_on_failure: formNotifyOnFailure,
       last_run_at: editingTask ? editingTask.last_run_at : null,
       last_exit_code: editingTask ? editingTask.last_exit_code : null,
       last_result: editingTask ? editingTask.last_result : null,
@@ -714,6 +721,12 @@ const CronContent = () => {
                             ? t("cron.status.active", "运行中")
                             : t("cron.status.paused", "已暂停")}
                         </Badge>
+                        {task.notify_on_failure && (
+                          <Badge size="1" color="amber" variant="surface" title="已开启失败告警联动">
+                            <Bell size={10} className="mr-0.5 inline" />
+                            告警
+                          </Badge>
+                        )}
                       </Flex>
                     </td>
 
@@ -929,6 +942,19 @@ const CronContent = () => {
               </label>
             </Flex>
 
+            {/* Failure Alert Notification Switch */}
+            <Flex align="center" gap="3" className="mt-1">
+              <Switch checked={formNotifyOnFailure} onCheckedChange={setFormNotifyOnFailure} />
+              <Flex direction="column">
+                <label className="text-sm font-medium cursor-pointer" onClick={() => setFormNotifyOnFailure(!formNotifyOnFailure)}>
+                  {t("cron.notifyOnFailure", "失败告警联动 (Failure Alert)")}
+                </label>
+                <span className="text-xs text-muted-foreground">
+                  {t("cron.notifyOnFailureHelp", "任务在任何节点执行失败或节点离线时，通过系统通知渠道自动推送告警")}
+                </span>
+              </Flex>
+            </Flex>
+
             {/* 2FA Protection Input */}
             {twoFaEnabled ? (
               <Flex direction="column" gap="1" className="mt-2">
@@ -1052,42 +1078,86 @@ const CronContent = () => {
             查看该定时任务最近的执行历史记录与返回结果
           </Dialog.Description>
 
-          <div className="flex-1 overflow-y-auto space-y-3 pr-1">
+          <div className="flex-1 overflow-y-auto space-y-4 pr-1">
             {loadingLogs ? (
               <Loading />
             ) : selectedTaskLogs.length === 0 ? (
-              <div className="py-8 text-center text-muted-foreground">暂无历史执行日志</div>
+              <div className="py-8 text-center text-muted-foreground">{t("cron.noLogs", "暂无历史执行日志")}</div>
             ) : (
-              selectedTaskLogs.map((log) => (
-                <div
-                  key={log.id}
-                  className="border rounded-md p-3 bg-accent-a1 flex flex-col gap-2"
-                >
-                  <Flex justify="between" align="center" wrap="wrap" gap="2">
-                    <Flex align="center" gap="2">
-                      <span className="text-xs text-muted-foreground">
-                        触发时间: {(() => {
-                          const rawTime = log.triggered_at || log.start_time;
-                          if (!rawTime) return t("common.just_now", "刚刚");
-                          const d = new Date(rawTime);
-                          return isNaN(d.getTime()) ? String(rawTime) : d.toLocaleString();
-                        })()}
-                      </span>
-                      {log.node_name && (
-                        <Badge color="gray" variant="outline" size="1">
-                          {log.node_name}
-                        </Badge>
-                      )}
-                    </Flex>
-                    <Badge color={log.exit_code === 0 ? "green" : "red"} variant="soft">
-                      退出码: {log.exit_code ?? 0}
-                    </Badge>
-                  </Flex>
-                  <div className="bg-black/85 text-emerald-400 p-3 rounded font-mono text-xs overflow-x-auto whitespace-pre-wrap select-text">
-                    {log.output || "[无输出内容]"}
-                  </div>
-                </div>
-              ))
+              <div className="relative pl-6 border-l-2 border-border/60 ml-2 space-y-4 my-2">
+                {selectedTaskLogs.map((log) => {
+                  const isSuccess = log.exit_code === 0;
+                  const rawTime = log.triggered_at || log.start_time;
+                  let timeStr = t("common.just_now", "刚刚");
+                  if (rawTime) {
+                    const d = new Date(rawTime);
+                    timeStr = isNaN(d.getTime()) ? String(rawTime) : d.toLocaleString();
+                  }
+
+                  let durationStr = "";
+                  if (log.start_time && (log.finished_at || log.end_time)) {
+                    const start = new Date(log.start_time).getTime();
+                    const end = new Date((log.finished_at || log.end_time)!).getTime();
+                    if (!isNaN(start) && !isNaN(end) && end >= start) {
+                      const diffSec = ((end - start) / 1000).toFixed(1);
+                      durationStr = `${diffSec}s`;
+                    }
+                  }
+
+                  return (
+                    <div key={log.id} className="relative group">
+                      {/* Timeline dot */}
+                      <div className="absolute -left-[31px] top-1 p-0.5 rounded-full bg-background">
+                        {isSuccess ? (
+                          <CheckCircle2 size={16} className="text-emerald-500" />
+                        ) : (
+                          <AlertCircle size={16} className="text-rose-500" />
+                        )}
+                      </div>
+
+                      <div className="border rounded-lg p-3 bg-accent-a1 flex flex-col gap-2 hover:border-border transition-colors">
+                        <Flex justify="between" align="center" wrap="wrap" gap="2">
+                          <Flex align="center" gap="2">
+                            <span className="text-xs font-medium text-foreground">
+                              {timeStr}
+                            </span>
+                            {durationStr && (
+                              <Badge size="1" color="gray" variant="surface">
+                                耗时: {durationStr}
+                              </Badge>
+                            )}
+                            {log.node_name && (
+                              <Badge color="blue" variant="soft" size="1">
+                                节点: {log.node_name}
+                              </Badge>
+                            )}
+                          </Flex>
+                          <Flex align="center" gap="2">
+                            <Badge color={isSuccess ? "green" : "red"} variant="soft">
+                              {isSuccess ? "执行成功 (0)" : `失败 (${log.exit_code ?? -1})`}
+                            </Badge>
+                            <IconButton
+                              size="1"
+                              variant="ghost"
+                              title={t("common.copy", "复制输出")}
+                              onClick={() => {
+                                navigator.clipboard.writeText(log.output || "");
+                                toast.success(t("copy_success", "已复制到剪贴板"));
+                              }}
+                            >
+                              <Copy size={12} />
+                            </IconButton>
+                          </Flex>
+                        </Flex>
+
+                        <div className="bg-black/90 text-emerald-400 p-2.5 rounded font-mono text-xs overflow-x-auto whitespace-pre-wrap select-text max-h-48">
+                          {log.output || "[无标准输出]"}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
             )}
           </div>
 

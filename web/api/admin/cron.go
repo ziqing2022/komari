@@ -22,6 +22,7 @@ type CronTaskInput struct {
 	CronExpression  string             `json:"cron_expression"`
 	TargetNodes     models.StringArray `json:"target_nodes"`
 	Enabled         *bool              `json:"enabled"`
+	NotifyOnFailure *bool              `json:"notify_on_failure"`
 }
 
 func findCronTask(id string) (*models.CronTask, error) {
@@ -102,6 +103,11 @@ func CreateCronTask(c *gin.Context) {
 		enabled = *input.Enabled
 	}
 
+	notifyOnFailure := false
+	if input.NotifyOnFailure != nil {
+		notifyOnFailure = *input.NotifyOnFailure
+	}
+
 	targetNodes := input.TargetNodes
 	if len(targetNodes) == 0 {
 		targetNodes = models.StringArray{"all"}
@@ -119,6 +125,7 @@ func CreateCronTask(c *gin.Context) {
 		CronExpression:  input.CronExpression,
 		TargetNodes:     targetNodes,
 		Enabled:         enabled,
+		NotifyOnFailure: notifyOnFailure,
 		NextRunAt:       &nextRun,
 		CreatedAt:       now,
 		UpdatedAt:       now,
@@ -165,6 +172,10 @@ func UpdateCronTask(c *gin.Context) {
 		if input.Enabled != nil {
 			enabled = *input.Enabled
 		}
+		notifyOnFailure := false
+		if input.NotifyOnFailure != nil {
+			notifyOnFailure = *input.NotifyOnFailure
+		}
 		targetNodes := input.TargetNodes
 		if len(targetNodes) == 0 {
 			targetNodes = models.StringArray{"all"}
@@ -179,6 +190,7 @@ func UpdateCronTask(c *gin.Context) {
 			CronExpression:  input.CronExpression,
 			TargetNodes:     targetNodes,
 			Enabled:         enabled,
+			NotifyOnFailure: notifyOnFailure,
 			NextRunAt:       &nextRun,
 			CreatedAt:       now,
 			UpdatedAt:       now,
@@ -206,6 +218,9 @@ func UpdateCronTask(c *gin.Context) {
 		}
 		if input.Enabled != nil {
 			task.Enabled = *input.Enabled
+		}
+		if input.NotifyOnFailure != nil {
+			task.NotifyOnFailure = *input.NotifyOnFailure
 		}
 		if task.Enabled {
 			now := time.Now().UTC()

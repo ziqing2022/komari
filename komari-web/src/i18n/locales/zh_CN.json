@@ -45,6 +45,31 @@
                              "upload_success":  "上传成功"
                          },
     "admin":  {
+                  "batch":  {
+                                "selectedCount":  "已选中 {{count}} 台服务器",
+                                "execCommand":  "批量执行命令",
+                                "editGroupTags":  "批量分组/标签",
+                                "switchVersion":  "批量版本切换",
+                                "execTitle":  "批量远程命令执行",
+                                "execDesc":  "即将向选中的 {{count}} 台目标服务器批量下发指令",
+                                "targetServers":  "目标节点",
+                                "command":  "Shell 指令",
+                                "results":  "实时执行回传",
+                                "execDispatched":  "批量任务已下发，正在接收执行结果...",
+                                "groupTagsTitle":  "批量修改分组与标签",
+                                "groupTagsDesc":  "统一调整已选中的 {{count}} 台服务器的分组和标签",
+                                "setGroup":  "设置统一分组",
+                                "groupPlaceholder":  "例如: 生产节点 / 国内主机",
+                                "tagMode":  "标签操作模式",
+                                "noChanges":  "请至少勾选或选择一项需要更新的内容",
+                                "groupTagsSuccess":  "已成功更新 {{count}} / {{total}} 台服务器",
+                                "versionTitle":  "批量版本升级 / 切换",
+                                "versionDesc":  "为选中的 {{count}} 台服务器下发版本切换指令（仅对在线 v2 Agent 有效）",
+                                "selectTargetVersion":  "目标版本",
+                                "emptyVersion":  "请输入目标版本号",
+                                "switchSuccess":  "已向 {{count}} / {{total}} 台服务器下发版本切换指令",
+                                "dispatch":  "立即下发切换"
+                            },
                   "nodeDetail":  {
                                      "arch":  "架构",
                                      "clientVersion":  "客户端版本",
@@ -1668,7 +1693,8 @@
                                             "ping":  "网络质量",
                                             "resources":  "资源容量",
                                             "shortcuts":  "快捷操作",
-                                            "traffic":  "24 小时流量"
+                                            "traffic":  "24 小时流量",
+                                            "cron":  "定时任务"
                                         },
                             "width":  "卡片宽度",
                             "workspace":  "我的仪表盘"

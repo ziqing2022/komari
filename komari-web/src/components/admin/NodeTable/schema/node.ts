@@ -5,6 +5,8 @@ export interface ClientFormData {
   token: string;
   remark: string;
   public_remark: string;
+  group?: string;
+  tags?: string;
 }
 
 export const schema = z.object({
@@ -30,6 +32,8 @@ export const schema = z.object({
   token: z.string().optional(),
   remark: z.string().optional(),
   public_remark: z.string().optional(),
+  group: z.string().optional(),
+  tags: z.string().optional(),
 });
 
 export type NodeSchema = z.infer<typeof schema>;

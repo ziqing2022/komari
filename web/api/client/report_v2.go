@@ -14,6 +14,8 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
 	"github.com/komari-monitor/komari/database/clients"
+	"github.com/komari-monitor/komari/database/dbcore"
+	"github.com/komari-monitor/komari/database/models"
 	"github.com/komari-monitor/komari/database/tasks"
 	v2 "github.com/komari-monitor/komari/protocol/v2"
 	"github.com/komari-monitor/komari/utils/notifier"
@@ -90,6 +92,9 @@ func handleV2RPC(uuid string, req v2.Request, allowWait bool) v2.Response {
 		}
 		if err := tasks.SaveTaskResult(params.TaskID, uuid, params.Result, params.ExitCode, finishedAt); err != nil {
 			return v2.Error(req.ID, -32000, "failed to save task result", err.Error())
+		}
+		if strings.HasPrefix(params.TaskID, "cron-") {
+			go handleCronTaskResult(params.TaskID, uuid, params.ExitCode, params.Result)
 		}
 		return v2.Success(req.ID, gin.H{"status": "success"})
 	case v2.MethodAgentPull:
@@ -256,4 +261,31 @@ func notifierOnline(uuid string, connID int64) {
 func notifierOffline(uuid string, connID int64) {
 	defer func() { _ = recover() }()
 	notifier.OfflineNotification(uuid, connID)
+}
+
+func handleCronTaskResult(taskID, uuid string, exitCode int, result string) {
+	defer func() { _ = recover() }()
+	// taskID format: cron-<task.Id>-<random8>
+	trimmed := strings.TrimPrefix(taskID, "cron-")
+	lastDash := strings.LastIndex(trimmed, "-")
+	if lastDash <= 0 {
+		return
+	}
+	cronId := trimmed[:lastDash]
+	bareID := strings.TrimPrefix(strings.TrimPrefix(cronId, "cron-"), "task-")
+
+	db := dbcore.GetDBInstance()
+	var task models.CronTask
+	if err := db.Where("id = ? OR id = ? OR id = ?", cronId, "cron-"+bareID, bareID).First(&task).Error; err == nil {
+		updates := map[string]interface{}{
+			"last_exit_code": exitCode,
+			"last_result":    result,
+			"updated_at":     time.Now().UTC(),
+		}
+		_ = db.Model(&task).Updates(updates).Error
+
+		if exitCode != 0 && task.NotifyOnFailure {
+			notifier.NotifyCronFailure(&task, uuid, exitCode, result)
+		}
+	}
 }

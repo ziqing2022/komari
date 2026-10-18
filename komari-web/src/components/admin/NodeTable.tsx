@@ -59,6 +59,7 @@ import { toast } from "sonner";
 import { LoadingIcon } from "../Icones/icon";
 import { Dialog, Flex, Button, IconButton, Checkbox, TextField } from "@radix-ui/themes";
 import Loading from "../loading";
+import { BatchOperationsBar } from "./NodeTable/BatchOperations";
 
 const columns: ColumnDef<z.infer<typeof schema>>[] = [
   {
@@ -240,6 +241,11 @@ export function DataTable() {
     getFacetedRowModel: getFacetedRowModel(),
     getFacetedUniqueValues: getFacetedUniqueValues(),
   });
+
+  const selectedNodes = React.useMemo(() => {
+    return table.getFilteredSelectedRowModel().rows.map((r) => r.original);
+  }, [table, rowSelection]);
+
   function handleDragEnd(event: DragEndEvent) {
     const { active, over } = event;
     if (active && over) {
@@ -466,6 +472,11 @@ export function DataTable() {
                 </DropdownMenuContent>
               </DropdownMenu>
             </div>
+            <BatchOperationsBar
+              selectedNodes={selectedNodes}
+              onClearSelection={() => setRowSelection({})}
+              onRefresh={refreshTable}
+            />
           </div>
         </div>
       </DataTableRefreshContext.Provider>

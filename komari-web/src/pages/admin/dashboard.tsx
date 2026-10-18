@@ -25,6 +25,7 @@ import { formatBytes } from "@/utils/unitHelper";
 import Loading from "@/components/loading";
 import { DashboardBoard, DashboardWidget } from "@/components/admin/dashboard/DashboardBoard";
 import { ExtraWidget } from "@/components/admin/dashboard/ExtraWidgets";
+import { CronDashboardWidget } from "@/components/admin/dashboard/CronDashboardWidget";
 import Tips from "@/components/ui/tips";
 import {
   ChartContainer,
@@ -1420,6 +1421,7 @@ const DashboardContent = () => {
       <DashboardWidget id="resources"><ExtraWidget kind="resources" nodes={nodeList ?? []} latest={latest} /></DashboardWidget>
       <DashboardWidget id="disk" supportsLimit>{(limit) => <ExtraWidget kind="disk" nodes={nodeList ?? []} latest={latest} limit={limit} />}</DashboardWidget>
       <DashboardWidget id="shortcuts"><ExtraWidget kind="shortcuts" nodes={nodeList ?? []} latest={latest} /></DashboardWidget>
+      <DashboardWidget id="cron" supportsLimit>{(limit) => <CronDashboardWidget limit={limit} />}</DashboardWidget>
       </DashboardBoard>
     </Flex>
   );

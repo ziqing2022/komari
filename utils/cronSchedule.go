@@ -13,6 +13,7 @@ import (
 	"github.com/komari-monitor/komari/internal/scheduler"
 	v2 "github.com/komari-monitor/komari/protocol/v2"
 	logger "github.com/komari-monitor/komari/utils/log"
+	"github.com/komari-monitor/komari/utils/notifier"
 	agent_runtime "github.com/komari-monitor/komari/web/agent"
 )
 
@@ -138,6 +139,9 @@ func ExecuteCronTask(task *models.CronTask) (string, error) {
 	exitCode := 0
 	if len(onlineClients) == 0 && len(queuedClients) == 0 && len(offlineClients) > 0 {
 		exitCode = -1
+		if task.NotifyOnFailure {
+			notifier.NotifyCronFailure(task, "", -1, "所有目标节点均处于离线状态，指令未能下发")
+		}
 	}
 	task.LastRunAt = &now
 	task.LastExitCode = &exitCode

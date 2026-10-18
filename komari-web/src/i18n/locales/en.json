@@ -45,6 +45,31 @@
                              "upload_success":  "Upload success"
                          },
     "admin":  {
+                  "batch":  {
+                                "selectedCount":  "{{count}} server(s) selected",
+                                "execCommand":  "Batch Execute Command",
+                                "editGroupTags":  "Batch Group/Tags",
+                                "switchVersion":  "Batch Switch Version",
+                                "execTitle":  "Batch Remote Command Execution",
+                                "execDesc":  "Dispatches shell command to {{count}} selected target server(s)",
+                                "targetServers":  "Target Nodes",
+                                "command":  "Shell Command",
+                                "results":  "Execution Output",
+                                "execDispatched":  "Batch command dispatched, awaiting execution results...",
+                                "groupTagsTitle":  "Batch Edit Group & Tags",
+                                "groupTagsDesc":  "Update group and tags across {{count}} selected server(s)",
+                                "setGroup":  "Set Group",
+                                "groupPlaceholder":  "e.g. Production / US-East",
+                                "tagMode":  "Tag Mode",
+                                "noChanges":  "Please specify at least one field to update",
+                                "groupTagsSuccess":  "Successfully updated {{count}} / {{total}} server(s)",
+                                "versionTitle":  "Batch Agent Version Switch",
+                                "versionDesc":  "Dispatch version switch to {{count}} selected server(s) (online v2 agents)",
+                                "selectTargetVersion":  "Target Version",
+                                "emptyVersion":  "Please enter target version",
+                                "switchSuccess":  "Dispatched version switch to {{count}} / {{total}} server(s)",
+                                "dispatch":  "Dispatch Switch"
+                            },
                   "nodeDetail":  {
                                      "arch":  "Architecture",
                                      "clientVersion":  "Client version",
@@ -1676,7 +1701,8 @@
                                             "ping":  "Network quality",
                                             "resources":  "Resource capacity",
                                             "disk":  "Disk pressure",
-                                            "shortcuts":  "Quick actions"
+                                            "shortcuts":  "Quick actions",
+                                            "cron":  "Cron Tasks"
                                         }
                         },
     "onboarding":  {

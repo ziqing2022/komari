@@ -597,28 +597,7 @@ const CronContent = () => {
     }
   };
 
-  const getMockLogs = (task: CronTask): CronLog[] => [
-    {
-      id: "log-1",
-      task_id: task.id,
-      task_name: task.name,
-      triggered_at: task.last_run_at || new Date().toISOString(),
-      finished_at: task.last_run_at || new Date().toISOString(),
-      exit_code: task.last_exit_code ?? 0,
-      output: task.last_result || "Executed successfully without errors.",
-      target_nodes_count: task.target_nodes.includes("all") ? (nodeDetail?.length || 1) : task.target_nodes.length,
-    },
-    {
-      id: "log-2",
-      task_id: task.id,
-      task_name: task.name,
-      triggered_at: new Date(Date.now() - 86400 * 1000).toISOString(),
-      finished_at: new Date(Date.now() - 86400 * 1000 + 1200).toISOString(),
-      exit_code: 0,
-      output: "Previous run finished with return code 0.",
-      target_nodes_count: task.target_nodes.includes("all") ? (nodeDetail?.length || 1) : task.target_nodes.length,
-    },
-  ];
+
 
   const formatSchedule = (task: CronTask) => {
     if (task.schedule_type === "cron") {

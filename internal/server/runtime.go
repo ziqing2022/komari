@@ -23,6 +23,7 @@ import (
 	"github.com/komari-monitor/komari/utils/geoip"
 	logger "github.com/komari-monitor/komari/utils/log"
 	"github.com/komari-monitor/komari/utils/notifier"
+	"github.com/komari-monitor/komari/utils"
 	"github.com/komari-monitor/komari/web/api"
 	"github.com/komari-monitor/komari/web/oauth"
 	recoveryweb "github.com/komari-monitor/komari/web/recovery"
@@ -178,10 +179,11 @@ func (a *App) runCleanups(ctx context.Context) error {
 }
 
 func registerScheduledWork() {
+	utils.OnCronFailure = notifier.NotifyCronFailure
 	if err := tasks.ReloadPingSchedule(); err != nil {
 		logger.ErrorArgs("server", "Failed to reload ping schedule:", err)
 	}
-	if err := tasks.ReloadCronSchedule(); err != nil {
+	if err := utils.ReloadCronSchedule(); err != nil {
 		logger.ErrorArgs("server", "Failed to reload cron schedule:", err)
 	}
 	if err := scheduler.AddFunc("records:cleanup", "@every 30m", cleanupScheduledData); err != nil {

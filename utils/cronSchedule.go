@@ -13,9 +13,14 @@ import (
 	"github.com/komari-monitor/komari/internal/scheduler"
 	v2 "github.com/komari-monitor/komari/protocol/v2"
 	logger "github.com/komari-monitor/komari/utils/log"
-	"github.com/komari-monitor/komari/utils/notifier"
 	agent_runtime "github.com/komari-monitor/komari/web/agent"
 )
+
+// CronFailureNotifierFunc 定时任务失败告警回调函数
+type CronFailureNotifierFunc func(task *models.CronTask, clientUUID string, exitCode int, output string)
+
+// OnCronFailure 全局告警回调（由 server runtime 初始化注入，避免包循环引用）
+var OnCronFailure CronFailureNotifierFunc
 
 // ExecuteCronTask 执行指定定时任务并真实下发给目标 Agent 节点
 func ExecuteCronTask(task *models.CronTask) (string, error) {
@@ -139,8 +144,8 @@ func ExecuteCronTask(task *models.CronTask) (string, error) {
 	exitCode := 0
 	if len(onlineClients) == 0 && len(queuedClients) == 0 && len(offlineClients) > 0 {
 		exitCode = -1
-		if task.NotifyOnFailure {
-			notifier.NotifyCronFailure(task, "", -1, "所有目标节点均处于离线状态，指令未能下发")
+		if task.NotifyOnFailure && OnCronFailure != nil {
+			OnCronFailure(task, "", -1, "所有目标节点均处于离线状态，指令未能下发")
 		}
 	}
 	task.LastRunAt = &now

@@ -31,6 +31,7 @@ import {
 import { toast } from "sonner";
 import { NodeDetailsProvider, useNodeDetails } from "@/contexts/NodeDetailsContext";
 import NodeSelector from "@/components/NodeSelector";
+import NodeSelectorDialog from "@/components/NodeSelectorDialog";
 import Loading from "@/components/loading";
 
 export interface CronTask {
@@ -920,17 +921,60 @@ const CronContent = () => {
             </div>
 
             {/* Target Nodes Selector */}
-            <div>
-              <label className="text-sm font-semibold mb-2 block">
-                {t("cron.targetNodes", "目标服务器节点")}
-              </label>
-              {isNodesLoading ? (
-                <Loading />
-              ) : (
-                <NodeSelector
-                  value={formTargetNodes}
-                  onChange={setFormTargetNodes}
-                />
+            <div className="space-y-2">
+              <Flex justify="between" align="center">
+                <label className="text-sm font-semibold">
+                  {t("cron.targetNodes", "目标服务器节点")}
+                </label>
+                <div className="flex items-center gap-1.5 bg-accent-a2 p-0.5 rounded-lg text-xs">
+                  <Button
+                    type="button"
+                    size="1"
+                    variant={formTargetNodes.includes("all") ? "solid" : "ghost"}
+                    color={formTargetNodes.includes("all") ? "blue" : "gray"}
+                    onClick={() => setFormTargetNodes(["all"])}
+                  >
+                    {t("ping.all_servers", "全部服务器")} ({nodeDetail?.length || 0})
+                  </Button>
+                  <Button
+                    type="button"
+                    size="1"
+                    variant={!formTargetNodes.includes("all") ? "solid" : "ghost"}
+                    color={!formTargetNodes.includes("all") ? "indigo" : "gray"}
+                    onClick={() => {
+                      if (formTargetNodes.includes("all")) {
+                        setFormTargetNodes(nodeDetail?.length ? [nodeDetail[0].uuid] : []);
+                      }
+                    }}
+                  >
+                    指定节点 ({formTargetNodes.includes("all") ? 0 : formTargetNodes.length})
+                  </Button>
+                </div>
+              </Flex>
+
+              {!formTargetNodes.includes("all") && (
+                <div className="p-3 border border-border/60 rounded-lg bg-accent-a1 flex flex-col gap-2">
+                  <Flex justify="between" align="center">
+                    <span className="text-xs text-muted-foreground">
+                      已选择 {formTargetNodes.length} 台服务器，定时任务将仅在选中的节点上并发下发执行。
+                    </span>
+                    <NodeSelectorDialog
+                      value={formTargetNodes}
+                      onChange={setFormTargetNodes}
+                      title="选择下发目标服务器"
+                    >
+                      <Button type="button" size="1" variant="soft">
+                        点此选择节点 ({formTargetNodes.length}/{nodeDetail?.length || 0})
+                      </Button>
+                    </NodeSelectorDialog>
+                  </Flex>
+                  <div className="max-h-48 overflow-y-auto">
+                    <NodeSelector
+                      value={formTargetNodes}
+                      onChange={setFormTargetNodes}
+                    />
+                  </div>
+                </div>
               )}
             </div>
 

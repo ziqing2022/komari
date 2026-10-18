@@ -26,8 +26,17 @@ import { useTranslation } from "react-i18next";
 import { useRPC2Call } from "@/contexts/RPC2Context";
 import type { NodeSchema } from "./schema/node";
 
+type BatchNodeItem = {
+  uuid: string;
+  name?: string;
+  group?: string;
+  tags?: string;
+  version?: string;
+  [key: string]: any;
+};
+
 interface BatchOperationsProps {
-  selectedNodes: NodeSchema[];
+  selectedNodes: BatchNodeItem[];
   onClearSelection: () => void;
   onRefresh: () => void;
 }
@@ -46,7 +55,7 @@ export const BatchOperationsBar: React.FC<BatchOperationsProps> = ({
 
   return (
     <>
-      <div className="sticky bottom-4 z-30 mx-auto w-full max-w-4xl px-4 py-2 bg-background/95 backdrop-blur border border-border shadow-2xl rounded-xl transition-all animate-in fade-in slide-in-from-bottom-4">
+      <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 w-[92%] max-w-4xl px-4 py-2.5 bg-background/95 backdrop-blur-md border border-border shadow-2xl rounded-2xl transition-all animate-in fade-in slide-in-from-bottom-5">
         <Flex justify="between" align="center" wrap="wrap" gap="3">
           <Flex align="center" gap="2">
             <Badge size="2" color="blue" variant="solid">
@@ -143,7 +152,7 @@ interface BatchTaskResult {
 const BatchCommandDialog: React.FC<{
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  nodes: NodeSchema[];
+  nodes: BatchNodeItem[];
 }> = ({ open, onOpenChange, nodes }) => {
   const { t } = useTranslation();
   const [command, setCommand] = useState("");
@@ -386,7 +395,7 @@ const BatchCommandDialog: React.FC<{
 const BatchGroupTagsDialog: React.FC<{
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  nodes: NodeSchema[];
+  nodes: BatchNodeItem[];
   onSuccess: () => void;
 }> = ({ open, onOpenChange, nodes, onSuccess }) => {
   const { t } = useTranslation();
@@ -575,7 +584,7 @@ const BatchGroupTagsDialog: React.FC<{
 const BatchVersionDialog: React.FC<{
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  nodes: NodeSchema[];
+  nodes: BatchNodeItem[];
   onSuccess: () => void;
 }> = ({ open, onOpenChange, nodes, onSuccess }) => {
   const { t } = useTranslation();

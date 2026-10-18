@@ -10,6 +10,7 @@ import {
   type NodeDetail,
 } from "@/contexts/NodeDetailsContext";
 import { useLiveData } from "@/contexts/LiveDataContext";
+import { BatchOperationsBar } from "@/components/admin/NodeTable/BatchOperations";
 import {
   Flex,
   TextField,
@@ -133,12 +134,23 @@ const Layout = () => {
       {isEmpty ? (
         <EmptyNodesGuide />
       ) : (
-        <NodeTable
-          nodes={filteredNodes}
-          selectedNodes={selectedNodes}
-          setSelectedNodes={setSelectedNodes}
-          settings={settings}
-        />
+        <>
+          <NodeTable
+            nodes={filteredNodes}
+            selectedNodes={selectedNodes}
+            setSelectedNodes={setSelectedNodes}
+            settings={settings}
+          />
+          <BatchOperationsBar
+            selectedNodes={
+              Array.isArray(nodeDetail)
+                ? nodeDetail.filter((n) => selectedNodes.includes(n.uuid))
+                : []
+            }
+            onClearSelection={() => setSelectedNodes([])}
+            onRefresh={refresh}
+          />
+        </>
       )}
     </Flex>
   );

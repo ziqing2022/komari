@@ -182,6 +182,9 @@ func WebSocketV2RPC(c *gin.Context) {
 	agent_runtime.SetConnectedClients(uuid, conn)
 	agent_runtime.MarkV2Client(uuid)
 	go notifierOnline(uuid, conn.ID)
+	go func() {
+		_ = agent_runtime.SyncClientTunnels(uuid)
+	}()
 	defer func() {
 		agent_runtime.DeleteClientConditionally(uuid, conn)
 		notifierOffline(uuid, conn.ID)

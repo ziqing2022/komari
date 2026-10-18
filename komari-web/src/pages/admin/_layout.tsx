@@ -6,19 +6,25 @@ import { AccountProvider } from "@/contexts/AccountContext";
 import { LiveDataProvider } from "@/contexts/LiveDataContext";
 import { updateSettingsWithToast, useSettings } from "@/lib/api";
 import { Button, Dialog } from "@radix-ui/themes";
+import NotificationUpgradeNotice from "@/components/admin/NotificationUpgradeNotice";
 import { useEffect, useState } from "react";
 import { getEula } from "@/utils/eula";
 import { normalizeLanguage, readStoredLanguage } from "@/utils/language";
 import { useTranslation } from "react-i18next";
 import { useAccount } from "@/contexts/AccountContext";
 import Loading from "@/components/loading";
-import { loginPath, resolveLoginRedirect } from "@/utils";
+import { loginPath, resolveLoginRedirect } from "@/utils/loginRedirect";
 
 const AdminLayout = () => {
   const { t, i18n } = useTranslation();
   const { settings, loading, error, setSettings } = useSettings();
   const lang = readStoredLanguage() || "en";
   const [open, setOpen] = useState(false);
+  const [noticePending, setNoticePending] = useState(true);
+  const eulaPending =
+    normalizeLanguage(lang).startsWith("zh") && settings?.eula_accepted === false;
+  const noticesReady = !loading && !error && !open && !eulaPending;
+
   useEffect(() => {
     if (loading || error || !settings || settings.eula_accepted !== false) {
       setOpen(false);
@@ -28,8 +34,9 @@ const AdminLayout = () => {
       setOpen(true);
     }
   }, [loading, error, settings, lang]);
+
   return (
-    <LiveDataProvider>
+    <>
       <Dialog.Root open={open}>
         <Dialog.Content className="km-admin-eula-dialog">
           <Dialog.Content>
@@ -71,10 +78,17 @@ const AdminLayout = () => {
           </Dialog.Content>
         </Dialog.Content>
       </Dialog.Root>
+      <NotificationUpgradeNotice
+        ready={noticesReady}
+        onPendingChange={setNoticePending}
+      />
       <AdminNavigationProvider>
-        <AdminPanelBar content={<Outlet />} />
+        <AdminPanelBar
+          content={<Outlet />}
+          onboardingReady={noticesReady && !noticePending}
+        />
       </AdminNavigationProvider>
-    </LiveDataProvider>
+    </>
   );
 };
 

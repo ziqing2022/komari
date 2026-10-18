@@ -76,7 +76,7 @@ const CronPage = () => {
 
 const CronContent = () => {
   const { t } = useTranslation();
-  const { nodeDetail, isLoading: isNodesLoading } = useNodeDetails();
+  const { nodeDetail } = useNodeDetails();
 
   const [tasks, setTasks] = useState<CronTask[]>([]);
   const [loading, setLoading] = useState(true);

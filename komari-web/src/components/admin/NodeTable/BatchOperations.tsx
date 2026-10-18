@@ -24,7 +24,6 @@ import {
 import { toast } from "sonner";
 import { useTranslation } from "react-i18next";
 import { useRPC2Call } from "@/contexts/RPC2Context";
-import type { NodeSchema } from "./schema/node";
 
 type BatchNodeItem = {
   uuid: string;

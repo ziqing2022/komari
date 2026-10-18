@@ -3,7 +3,6 @@ import { Navigate, Outlet, useLocation, useNavigate } from "react-router-dom";
 import AdminPanelBar from "../../components/admin/AdminPanelBar";
 import { AdminNavigationProvider } from "@/contexts/AdminNavigationContext";
 import { AccountProvider } from "@/contexts/AccountContext";
-import { LiveDataProvider } from "@/contexts/LiveDataContext";
 import { updateSettingsWithToast, useSettings } from "@/lib/api";
 import { Button, Dialog } from "@radix-ui/themes";
 import NotificationUpgradeNotice from "@/components/admin/NotificationUpgradeNotice";

@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"crypto/ecdh"
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/hex"
@@ -70,16 +71,14 @@ func GenerateTunnelKeys(c *gin.Context) {
 	// 生成 UUID
 	newUUID := uuid.New().String()
 
-	// 生成 X25519 密钥对 (Reality)
-	privKeyBytes := make([]byte, 32)
-	_, _ = rand.Read(privKeyBytes)
-	privKeyBytes[0] &= 248
-	privKeyBytes[31] &= 127
-	privKeyBytes[31] |= 64
-	pubKeyBytes, _ := curve25519.X25519(privKeyBytes, curve25519.Basepoint)
-
-	privKeyBase64 := base64.RawURLEncoding.EncodeToString(privKeyBytes)
-	pubKeyBase64 := base64.RawURLEncoding.EncodeToString(pubKeyBytes)
+	// 生成 X25519 密钥对 (Reality) - 使用与 sing-box 官方完全一致的标准 ecdh
+	privKey, err := ecdh.X25519().GenerateKey(rand.Reader)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"status": "error", "message": err.Error()})
+		return
+	}
+	privKeyBase64 := base64.RawURLEncoding.EncodeToString(privKey.Bytes())
+	pubKeyBase64 := base64.RawURLEncoding.EncodeToString(privKey.PublicKey().Bytes())
 
 	// 生成 8 字节 Hex ShortID
 	shortIDBytes := make([]byte, 4)

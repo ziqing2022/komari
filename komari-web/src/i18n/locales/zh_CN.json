@@ -835,6 +835,56 @@
                  "runSuccess":  "已触发即时执行",
                  "statusUpdated":  "任务状态已更新"
              },
+        "tunnel": {
+        "title": "反向代理穿透",
+        "description": "基于 Sing-box 为服务器节点配置端口映射与反向代理穿透通道，自动放行系统防火墙",
+        "createTunnel": "新建隧道规则",
+        "editTunnel": "编辑隧道规则",
+        "deleteTunnel": "删除规则",
+        "deleteConfirm": "确定要删除该隧道映射规则吗？Agent 将自动释放监听端口并关闭防火墙放行规则。",
+        "server": "所属节点",
+        "selectServer": "选择服务器节点",
+        "allServers": "全部节点",
+        "filterByServer": "按节点筛选",
+        "ruleName": "规则名称",
+        "ruleNamePlaceholder": "例如：内网 Web 穿透 / SSH 端口映射",
+        "listenPort": "监听端口 (本地/公网端口)",
+        "listenPortPlaceholder": "例如：8080",
+        "protocol": "协议类型",
+        "protocols": {
+            "tcp": "TCP",
+            "udp": "UDP",
+            "both": "TCP + UDP"
+        },
+        "targetType": "远程目标类型",
+        "targetTypes": {
+            "local": "本机 (Localhost 127.0.0.1)",
+            "custom": "自定义目标 (IP / 域名)"
+        },
+        "targetHost": "目标主机 (Target Host)",
+        "targetHostPlaceholder": "例如：192.168.1.100 或 internal.domain",
+        "targetPort": "目标端口 (Target Port)",
+        "targetPortPlaceholder": "例如：80 或 22",
+        "autoOpenFirewall": "自动放行系统防火墙端口",
+        "autoOpenFirewallDesc": "Agent 会在规则生效时自动调用系统防火墙（ufw / firewalld / iptables / netsh）放行对应端口，删除或停用时自动清理",
+        "status": {
+            "active": "生效中",
+            "paused": "已暂停",
+            "error": "异常"
+        },
+        "actions": "操作",
+        "enable": "启用",
+        "pause": "暂停",
+        "noTunnels": "暂无穿透隧道规则，点击上方「新建隧道规则」开始创建",
+        "twoFaPrompt": "此敏感网络配置受 2FA 验证保护，请输入 6 位动态验证码",
+        "saveSuccess": "隧道映射规则已保存并实时下发至 Agent",
+        "deleteSuccess": "隧道规则已删除，Agent 端口及防火墙已清理",
+        "statusUpdated": "隧道状态已更新",
+        "targetSummary": "映射到",
+        "localhost": "本机",
+        "remote": "远程"
+    },
+
     "page_not_found":  "真不巧，网页被小鞠吃掉了。",
     "ping":  {
                  "all_servers":  "全部服务器",

@@ -37,6 +37,11 @@
           "icon": "Clock"
         },
         {
+          "labelKey": "tunnel.title",
+          "path": "/admin/tunnel",
+          "icon": "Network"
+        },
+        {
           "labelKey": "sessions.title",
           "path": "/admin/sessions",
           "icon": "Users"

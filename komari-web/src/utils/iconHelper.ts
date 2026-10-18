@@ -27,6 +27,7 @@ import {
   LayoutDashboard,
   SquareTerminal,
   Clock,
+  Network,
 } from "lucide-react";
 
 
@@ -59,6 +60,7 @@ export const iconMap: Record<string, React.ComponentType<any>> = {
   LayoutDashboard,
   SquareTerminal,
   Clock,
+  Network,
 };
 // 解析插件/插件页面声明的 icon：
 // - lucide 图标名（iconMap 中存在）原样返回，由调用方用组件渲染；

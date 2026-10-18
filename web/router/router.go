@@ -144,6 +144,17 @@ func registerAdminRoutes(r *gin.Engine) {
 		cronGroup.GET("/:id/logs", admin.GetCronTaskLogs)
 	}
 
+	// 节点隧道与端口映射 (Sing-box) 统一 REST 接口，敏感操作受 2FA 保护
+	tunnelGroup := g.Group("/tunnel")
+	{
+		tunnelGroup.GET("", admin.ListTunnels)
+		tunnelGroup.GET("/generate_keys", admin.GenerateTunnelKeys)
+		tunnelGroup.POST("", api.RequireSensitive2FA(), admin.CreateTunnel)
+		tunnelGroup.PUT("/:id", api.RequireSensitive2FA(), admin.UpdateTunnel)
+		tunnelGroup.DELETE("/:id", api.RequireSensitive2FA(), admin.DeleteTunnel)
+		tunnelGroup.POST("/:id/toggle", admin.ToggleTunnel)
+	}
+
 	// oauth2 绑定走重定向，保留 REST handler。
 	oauth2 := g.Group("/oauth2")
 	{

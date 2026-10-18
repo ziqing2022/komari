@@ -262,6 +262,10 @@ export const routes: RouteObject[] = [
       {
         path: "cron",
         element: React.createElement(lazy(() => import("./pages/admin/cron"))),
+      },
+      {
+        path: "tunnel",
+        element: React.createElement(lazy(() => import("./pages/admin/tunnel"))),
       }
     ],
   },

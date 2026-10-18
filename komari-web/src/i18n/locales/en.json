@@ -835,6 +835,56 @@
                  "runSuccess":  "Triggered manual execution successfully",
                  "statusUpdated":  "Task status updated"
              },
+        "tunnel": {
+        "title": "Reverse Proxy Tunnel",
+        "description": "Configure port forwarding & reverse proxy tunnels for server nodes powered by Sing-box, with auto-firewall allowance",
+        "createTunnel": "New Tunnel Rule",
+        "editTunnel": "Edit Tunnel Rule",
+        "deleteTunnel": "Delete Tunnel",
+        "deleteConfirm": "Are you sure you want to delete this tunnel rule? The Agent will release the port and clean up firewall rules.",
+        "server": "Server Node",
+        "selectServer": "Select Server Node",
+        "allServers": "All Nodes",
+        "filterByServer": "Filter by Node",
+        "ruleName": "Rule Name",
+        "ruleNamePlaceholder": "e.g. Internal Web Tunnel / SSH Forwarding",
+        "listenPort": "Listen Port",
+        "listenPortPlaceholder": "e.g. 8080",
+        "protocol": "Protocol",
+        "protocols": {
+            "tcp": "TCP",
+            "udp": "UDP",
+            "both": "TCP + UDP"
+        },
+        "targetType": "Forwarding Target",
+        "targetTypes": {
+            "local": "Localhost (127.0.0.1)",
+            "custom": "Custom Host (IP / Domain)"
+        },
+        "targetHost": "Target Host",
+        "targetHostPlaceholder": "e.g. 192.168.1.100 or internal.domain",
+        "targetPort": "Target Port",
+        "targetPortPlaceholder": "e.g. 80 or 22",
+        "autoOpenFirewall": "Auto-open Firewall Port",
+        "autoOpenFirewallDesc": "Agent automatically permits the listen port in system firewall (ufw / firewalld / iptables / netsh) and cleans up on stop",
+        "status": {
+            "active": "Active",
+            "paused": "Paused",
+            "error": "Error"
+        },
+        "actions": "Actions",
+        "enable": "Enable",
+        "pause": "Pause",
+        "noTunnels": "No tunnel rules configured. Click 'New Tunnel Rule' to create one.",
+        "twoFaPrompt": "This sensitive operation is protected by 2FA. Please enter your 6-digit verification code",
+        "saveSuccess": "Tunnel rule saved and synced to Agent",
+        "deleteSuccess": "Tunnel rule deleted, agent port & firewall cleaned up",
+        "statusUpdated": "Tunnel status updated",
+        "targetSummary": "Forward to",
+        "localhost": "Localhost",
+        "remote": "Remote"
+    },
+
     "page_not_found":  "The server cannot find the specific page you\u0027re trying to access.",
     "ping":  {
                  "all_servers":  "All servers",

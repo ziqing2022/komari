@@ -86,10 +86,10 @@ func GenerateTunnelKeys(c *gin.Context) {
 	_, _ = rand.Read(shortIDBytes)
 	shortID := hex.EncodeToString(shortIDBytes)
 
-	// 生成通用密码 (16 字符安全随机字符串)
-	passBytes := make([]byte, 12)
+	// 生成通用密码 (16 字节标准 Base64 密钥，完美兼容 Shadowsocks-2022 与传统 SS)
+	passBytes := make([]byte, 16)
 	_, _ = rand.Read(passBytes)
-	passStr := base64.RawURLEncoding.EncodeToString(passBytes)
+	passStr := base64.StdEncoding.EncodeToString(passBytes)
 
 	c.JSON(http.StatusOK, gin.H{
 		"status": "success",

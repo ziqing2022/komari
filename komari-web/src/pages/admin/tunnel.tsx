@@ -60,6 +60,7 @@ export interface TunnelRule {
   private_key?: string;
   public_key?: string;
   short_id?: string;
+  fingerprint?: string;
 
   created_at: string;
   updated_at: string;
@@ -112,6 +113,7 @@ const TunnelContent = () => {
   const [formPrivateKey, setFormPrivateKey] = useState("");
   const [formPublicKey, setFormPublicKey] = useState("");
   const [formShortID, setFormShortID] = useState("");
+  const [formFingerprint, setFormFingerprint] = useState("ios");
 
   const [form2FaCode, setForm2FaCode] = useState("");
   const [saving, setSaving] = useState(false);
@@ -215,6 +217,7 @@ const TunnelContent = () => {
         if (data.public_key) setFormPublicKey(data.public_key);
         if (data.short_id) setFormShortID(data.short_id);
         if (data.password) setFormPassword(data.password);
+        if (data.fingerprint) setFormFingerprint(data.fingerprint);
         if (data.default_sni && !formSNI) setFormSNI(data.default_sni);
         toast.success("已成功生成随机 UUID、X25519 秘钥对及凭据！");
         return;
@@ -270,6 +273,7 @@ const TunnelContent = () => {
     setFormPrivateKey("");
     setFormPublicKey("");
     setFormShortID("");
+    setFormFingerprint("ios");
     setForm2FaCode("");
 
     // Auto-generate keys for vless
@@ -302,6 +306,7 @@ const TunnelContent = () => {
     setFormPrivateKey(rule.private_key || "");
     setFormPublicKey(rule.public_key || "");
     setFormShortID(rule.short_id || "");
+    setFormFingerprint(rule.fingerprint || "ios");
     setForm2FaCode("");
     setEditDialogOpen(true);
   };
@@ -374,6 +379,7 @@ const TunnelContent = () => {
       private_key: formPrivateKey.trim(),
       public_key: formPublicKey.trim(),
       short_id: formShortID.trim(),
+      fingerprint: formFingerprint,
     };
 
     try {
@@ -530,7 +536,8 @@ const TunnelContent = () => {
       const sni = rule.sni || "gateway.icloud.com";
       const pbk = rule.public_key || "";
       const sid = rule.short_id || "";
-      shareLink = `vless://${rule.uuid}@${serverHost}:${rule.listen_port}?encryption=none&flow=xtls-rprx-vision&security=reality&sni=${sni}&fp=chrome&pbk=${pbk}&sid=${sid}&type=tcp#${nameTag}`;
+      const fp = rule.fingerprint || "ios";
+      shareLink = `vless://${rule.uuid}@${serverHost}:${rule.listen_port}?encryption=none&flow=xtls-rprx-vision&security=reality&sni=${sni}&fp=${fp}&pbk=${pbk}&sid=${sid}&type=tcp#${nameTag}`;
     } else if (ruleType === "socks5") {
       if (rule.password) {
         shareLink = `socks5://${rule.username || "komari"}:${rule.password}@${serverHost}:${rule.listen_port}#${nameTag}`;
@@ -1181,6 +1188,26 @@ const TunnelContent = () => {
                     value={formShortID}
                     onChange={(e) => setFormShortID(e.target.value)}
                   />
+                </div>
+
+                <div>
+                  <Text as="label" size="2" weight="medium" className="block mb-1">
+                    TLS 伪装指纹 (Fingerprint)
+                  </Text>
+                  <Select.Root value={formFingerprint} onValueChange={(val) => setFormFingerprint(val)}>
+                    <Select.Trigger className="w-full" />
+                    <Select.Content>
+                      <Select.Item value="ios">ios (推荐，完美匹配 Apple/iCloud 伪装，避免握手重置)</Select.Item>
+                      <Select.Item value="edge">edge (推荐，微软 Edge 浏览器指纹)</Select.Item>
+                      <Select.Item value="chrome">chrome (标准 Google Chrome 指纹)</Select.Item>
+                      <Select.Item value="random">random (随机浏览器指纹)</Select.Item>
+                      <Select.Item value="safari">safari (苹果 Safari 指纹)</Select.Item>
+                      <Select.Item value="firefox">firefox (火狐 Firefox 指纹)</Select.Item>
+                    </Select.Content>
+                  </Select.Root>
+                  <Text size="1" color="gray" className="block mt-1">
+                    注：当 SNI 为 gateway.icloud.com 等苹果域名时，推荐选择 ios 或 edge，可防止 Xray 客户端抗量子扩展引发握手中断。
+                  </Text>
                 </div>
               </div>
             )}

@@ -40,6 +40,7 @@ type TunnelRuleInput struct {
 	PrivateKey string `json:"private_key"`
 	PublicKey  string `json:"public_key"`
 	ShortID    string `json:"short_id"`
+	Fingerprint string `json:"fingerprint"`
 }
 
 // ListTunnels 获取指定节点或全部节点的隧道与代理规则列表
@@ -98,6 +99,7 @@ func GenerateTunnelKeys(c *gin.Context) {
 			"short_id":    shortID,
 			"password":    passStr,
 			"default_sni": "gateway.icloud.com",
+			"fingerprint": "ios",
 		},
 	})
 }
@@ -172,6 +174,7 @@ func CreateTunnel(c *gin.Context) {
 		PrivateKey:       input.PrivateKey,
 		PublicKey:        input.PublicKey,
 		ShortID:          input.ShortID,
+		Fingerprint:      input.Fingerprint,
 		CreatedAt:        time.Now().UTC(),
 		UpdatedAt:        time.Now().UTC(),
 	}
@@ -263,6 +266,9 @@ func UpdateTunnel(c *gin.Context) {
 	}
 	if input.ShortID != "" {
 		rule.ShortID = input.ShortID
+	}
+	if input.Fingerprint != "" {
+		rule.Fingerprint = input.Fingerprint
 	}
 	rule.UpdatedAt = time.Now().UTC()
 

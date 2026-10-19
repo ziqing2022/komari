@@ -27,6 +27,7 @@ type TunnelRule struct {
 	PrivateKey string `json:"private_key" gorm:"type:varchar(255)"` // Reality x25519 私钥
 	PublicKey  string `json:"public_key" gorm:"type:varchar(255)"` // Reality x25519 公钥 (用于生成客户端链接)
 	ShortID    string `json:"short_id" gorm:"type:varchar(64)"` // Reality Short ID
+	Fingerprint string `json:"fingerprint" gorm:"type:varchar(64);default:'ios'"` // Reality 客户端 TLS 指纹 (ios, edge, chrome, random)
 
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`

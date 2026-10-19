@@ -62,6 +62,14 @@ export interface TunnelRule {
   short_id?: string;
   fingerprint?: string;
 
+  // 跨节点反向穿透专用字段
+  is_reverse?: boolean;
+  bridge_client_uuid?: string;
+  bridge_host?: string;
+  bridge_port?: number;
+  control_port?: number;
+  tunnel_secret?: string;
+
   created_at: string;
   updated_at: string;
 }
@@ -114,6 +122,14 @@ const TunnelContent = () => {
   const [formPublicKey, setFormPublicKey] = useState("");
   const [formShortID, setFormShortID] = useState("");
   const [formFingerprint, setFormFingerprint] = useState("ios");
+
+  // 跨节点反向穿透字段
+  const [formIsReverse, setFormIsReverse] = useState(false);
+  const [formBridgeClientUUID, setFormBridgeClientUUID] = useState("");
+  const [formBridgeHost, setFormBridgeHost] = useState("");
+  const [formBridgePort, setFormBridgePort] = useState<number | "">("");
+  const [formControlPort, setFormControlPort] = useState<number | "">(27888);
+  const [formTunnelSecret, setFormTunnelSecret] = useState("");
 
   const [form2FaCode, setForm2FaCode] = useState("");
   const [saving, setSaving] = useState(false);
@@ -274,6 +290,15 @@ const TunnelContent = () => {
     setFormPublicKey("");
     setFormShortID("");
     setFormFingerprint("ios");
+
+    // Reverse specifics
+    setFormIsReverse(false);
+    setFormBridgeClientUUID("");
+    setFormBridgeHost("");
+    setFormBridgePort("");
+    setFormControlPort(27888);
+    setFormTunnelSecret("");
+
     setForm2FaCode("");
 
     // Auto-generate keys for vless
@@ -307,6 +332,15 @@ const TunnelContent = () => {
     setFormPublicKey(rule.public_key || "");
     setFormShortID(rule.short_id || "");
     setFormFingerprint(rule.fingerprint || "ios");
+
+    // Reverse specifics
+    setFormIsReverse(Boolean(rule.is_reverse));
+    setFormBridgeClientUUID(rule.bridge_client_uuid || "");
+    setFormBridgeHost(rule.bridge_host || "");
+    setFormBridgePort(rule.bridge_port || rule.listen_port || "");
+    setFormControlPort(rule.control_port || 27888);
+    setFormTunnelSecret(rule.tunnel_secret || "");
+
     setForm2FaCode("");
     setEditDialogOpen(true);
   };
@@ -380,6 +414,13 @@ const TunnelContent = () => {
       public_key: formPublicKey.trim(),
       short_id: formShortID.trim(),
       fingerprint: formFingerprint,
+
+      is_reverse: formIsReverse,
+      bridge_client_uuid: formBridgeClientUUID,
+      bridge_host: formBridgeHost.trim(),
+      bridge_port: formIsReverse ? Number(formBridgePort) || listenPortNum : undefined,
+      control_port: formIsReverse ? Number(formControlPort) || 27888 : undefined,
+      tunnel_secret: formTunnelSecret.trim(),
     };
 
     try {
@@ -755,9 +796,16 @@ const TunnelContent = () => {
                         </Badge>
                       )}
                       {ruleType === "forward" && (
-                        <Badge color="gray" variant="outline">
-                          端口转发 ({rule.protocol.toUpperCase()})
-                        </Badge>
+                        rule.is_reverse ? (
+                          <Badge color="blue" variant="solid" className="flex items-center gap-1">
+                            <Sparkles className="w-3 h-3" />
+                            跨机反向穿透 (NAT Traversal)
+                          </Badge>
+                        ) : (
+                          <Badge color="gray" variant="outline">
+                            端口转发 ({rule.protocol.toUpperCase()})
+                          </Badge>
+                        )
                       )}
 
                       {/* Firewall allowance */}
@@ -777,29 +825,48 @@ const TunnelContent = () => {
                     {/* Routing or Protocol Details */}
                     <div className="text-sm bg-gray-50 dark:bg-gray-800/50 p-2.5 rounded-lg border border-gray-100 dark:border-gray-800">
                       {ruleType === "forward" ? (
-                        <Flex align="center" gap="3" wrap="wrap">
-                          <div className="flex items-center gap-1.5 font-mono text-blue-600 dark:text-blue-400 font-semibold">
-                            <Radio className="w-3.5 h-3.5" />
-                            <span>:{rule.listen_port}</span>
-                          </div>
-                          <ArrowRight className="w-4 h-4 text-gray-400" />
-                          <div className="flex items-center gap-2">
-                            {rule.target_type !== "custom" ? (
-                              <Badge color="amber" variant="soft" className="flex items-center gap-1">
-                                <Server className="w-3 h-3" />
-                                <span>{t("tunnel.localhost", "本机")}</span>
-                              </Badge>
-                            ) : (
-                              <Badge color="cyan" variant="soft" className="flex items-center gap-1">
+                        rule.is_reverse ? (
+                          <Flex align="center" gap="3" wrap="wrap">
+                            <div className="flex items-center gap-1.5 font-mono text-purple-700 dark:text-purple-300 font-bold">
+                              <Server className="w-4 h-4 text-purple-600" />
+                              <span>内网源 127.0.0.1:{rule.target_port || rule.listen_port}</span>
+                            </div>
+                            <ArrowRight className="w-4 h-4 text-blue-500 font-bold" />
+                            <div className="flex items-center gap-2">
+                              <Badge color="blue" variant="soft" className="flex items-center gap-1">
                                 <Globe className="w-3 h-3" />
-                                <span>{t("tunnel.remote", "远程")}</span>
+                                <span>公网出口</span>
                               </Badge>
-                            )}
-                            <span className="font-mono text-gray-700 dark:text-gray-300 font-medium">
-                              {rule.target_host}:{rule.target_port}
-                            </span>
-                          </div>
-                        </Flex>
+                              <span className="font-mono text-blue-700 dark:text-blue-300 font-bold">
+                                {rule.bridge_host || (rule.bridge_client_uuid && serverMap.get(rule.bridge_client_uuid)?.ipv4) || "公网端"}:{rule.bridge_port || rule.listen_port}
+                              </span>
+                            </div>
+                          </Flex>
+                        ) : (
+                          <Flex align="center" gap="3" wrap="wrap">
+                            <div className="flex items-center gap-1.5 font-mono text-blue-600 dark:text-blue-400 font-semibold">
+                              <Radio className="w-3.5 h-3.5" />
+                              <span>:{rule.listen_port}</span>
+                            </div>
+                            <ArrowRight className="w-4 h-4 text-gray-400" />
+                            <div className="flex items-center gap-2">
+                              {rule.target_type !== "custom" ? (
+                                <Badge color="amber" variant="soft" className="flex items-center gap-1">
+                                  <Server className="w-3 h-3" />
+                                  <span>{t("tunnel.localhost", "本机")}</span>
+                                </Badge>
+                              ) : (
+                                <Badge color="cyan" variant="soft" className="flex items-center gap-1">
+                                  <Globe className="w-3 h-3" />
+                                  <span>{t("tunnel.remote", "远程")}</span>
+                                </Badge>
+                              )}
+                              <span className="font-mono text-gray-700 dark:text-gray-300 font-medium">
+                                {rule.target_host}:{rule.target_port}
+                              </span>
+                            </div>
+                          </Flex>
+                        )
                       ) : (
                         <Flex align="center" gap="4" wrap="wrap" className="text-xs text-gray-600 dark:text-gray-300">
                           <div className="flex items-center gap-1 font-mono font-bold text-blue-600 dark:text-blue-400 text-sm">
@@ -1048,75 +1115,221 @@ const TunnelContent = () => {
 
             {/* Mode 1: Forwarding Specifics */}
             {formRuleType === "forward" && (
-              <div className="space-y-2 border border-gray-100 dark:border-gray-800 p-3 rounded-lg bg-gray-50/50 dark:bg-gray-800/30">
-                <Text as="label" size="2" weight="bold" className="block">
-                  {t("tunnel.targetType", "远程目标类型")}
-                </Text>
-
-                <div className="grid grid-cols-2 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setFormTargetType("local");
-                      setFormTargetHost("127.0.0.1");
-                    }}
-                    className={`flex items-center justify-center gap-2 p-2 rounded-md border text-sm font-medium transition-colors ${
-                      formTargetType === "local"
-                        ? "border-blue-500 bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300 dark:border-blue-700"
-                        : "border-gray-200 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-700 dark:text-gray-300"
-                    }`}
-                  >
-                    <Server className="w-4 h-4" />
-                    <span>本机 (127.0.0.1)</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setFormTargetType("custom");
-                      if (formTargetHost === "127.0.0.1") {
-                        setFormTargetHost("");
-                      }
-                    }}
-                    className={`flex items-center justify-center gap-2 p-2 rounded-md border text-sm font-medium transition-colors ${
-                      formTargetType === "custom"
-                        ? "border-blue-500 bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300 dark:border-blue-700"
-                        : "border-gray-200 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-700 dark:text-gray-300"
-                    }`}
-                  >
-                    <Globe className="w-4 h-4" />
-                    <span>自定义目标 (IP / 域名)</span>
-                  </button>
+              <div className="space-y-3 border border-gray-100 dark:border-gray-800 p-3 rounded-lg bg-gray-50/50 dark:bg-gray-800/30">
+                {/* 模式切换：正向直接转发 vs 跨节点反向穿透 */}
+                <div>
+                  <Text as="label" size="2" weight="bold" className="block mb-2">
+                    转发映射模式
+                  </Text>
+                  <div className="grid grid-cols-2 gap-2 p-1 bg-gray-200/60 dark:bg-gray-900/60 rounded-lg">
+                    <button
+                      type="button"
+                      onClick={() => setFormIsReverse(false)}
+                      className={`flex items-center justify-center gap-1.5 py-1.5 px-3 rounded-md text-xs font-semibold transition-all ${
+                        !formIsReverse
+                          ? "bg-white dark:bg-gray-800 text-blue-600 dark:text-blue-400 shadow-sm"
+                          : "text-gray-600 dark:text-gray-400 hover:text-gray-900"
+                      }`}
+                    >
+                      <Radio className="w-3.5 h-3.5" />
+                      <span>正向直接转发</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setFormIsReverse(true)}
+                      className={`flex items-center justify-center gap-1.5 py-1.5 px-3 rounded-md text-xs font-semibold transition-all ${
+                        formIsReverse
+                          ? "bg-blue-600 text-white shadow-sm"
+                          : "text-gray-600 dark:text-gray-400 hover:text-gray-900"
+                      }`}
+                    >
+                      <Sparkles className="w-3.5 h-3.5" />
+                      <span>反向穿透 (内网 ➔ 公网)</span>
+                    </button>
+                  </div>
                 </div>
 
-                {formTargetType === "custom" ? (
-                  <div className="pt-2">
-                    <Text as="label" size="2" weight="medium" className="block mb-1">
-                      {t("tunnel.targetHost", "目标主机")} *
-                    </Text>
-                    <TextField.Root
-                      placeholder={t("tunnel.targetHostPlaceholder", "例如：192.168.1.100 或 example.internal")}
-                      value={formTargetHost}
-                      onChange={(e) => setFormTargetHost(e.target.value)}
-                    />
+                {formIsReverse ? (
+                  /* 反向穿透模式专用表单 */
+                  <div className="space-y-3 pt-1 border-t border-gray-200/60 dark:border-gray-700/60">
+                    <div className="bg-blue-50/50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-900/40 p-2.5 rounded-md text-xs text-blue-800 dark:text-blue-300">
+                      💡 <strong>内网穿透说明</strong>：当前选中的节点将作为「内网端」，主动向指定的「公网暴露端」建立长连接反向隧道。外部访客访问公网节点端口即可直接访问内网服务！
+                    </div>
+
+                    <div>
+                      <Text as="label" size="2" weight="bold" className="block mb-1">
+                        公网暴露服务器 (Bridge Node) *
+                      </Text>
+                      <Select.Root
+                        value={formBridgeClientUUID}
+                        onValueChange={(val) => {
+                          setFormBridgeClientUUID(val);
+                          if (val !== "custom") {
+                            const node = serverMap.get(val);
+                            if (node?.ipv4) {
+                              setFormBridgeHost(node.ipv4);
+                            }
+                          } else {
+                            setFormBridgeHost("");
+                          }
+                        }}
+                      >
+                        <Select.Trigger className="w-full" placeholder="请选择公网机器或自定义" />
+                        <Select.Content>
+                          <Select.Group>
+                            <Select.Label>已有探针节点</Select.Label>
+                            {Array.isArray(nodeDetail) &&
+                              nodeDetail
+                                .filter((n) => n?.uuid && n.uuid !== formClientUUID)
+                                .map((n) => (
+                                  <Select.Item key={n.uuid} value={n.uuid}>
+                                    {n.name} {n.ipv4 ? `(${n.ipv4})` : ""}
+                                  </Select.Item>
+                                ))}
+                          </Select.Group>
+                          <Select.Separator />
+                          <Select.Group>
+                            <Select.Item value="custom">
+                              🌐 自定义公网机器 (手动输入公网 IP 或域名)
+                            </Select.Item>
+                          </Select.Group>
+                        </Select.Content>
+                      </Select.Root>
+                    </div>
+
+                    {formBridgeClientUUID === "custom" && (
+                      <div>
+                        <Text as="label" size="2" weight="medium" className="block mb-1">
+                          公网主机 IP 或域名 *
+                        </Text>
+                        <TextField.Root
+                          placeholder="例如：158.179.168.46 或 bridge.example.com"
+                          value={formBridgeHost}
+                          onChange={(e) => setFormBridgeHost(e.target.value)}
+                        />
+                      </div>
+                    )}
+
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <Text as="label" size="2" weight="bold" className="block mb-1">
+                          公网对外监听端口 *
+                        </Text>
+                        <TextField.Root
+                          type="number"
+                          placeholder="例如：8080"
+                          value={formBridgePort}
+                          onChange={(e) => setFormBridgePort(e.target.value === "" ? "" : Number(e.target.value))}
+                        />
+                        <Text size="1" color="gray" className="block mt-1">
+                          公网机上对外开放的访客端口
+                        </Text>
+                      </div>
+
+                      <div>
+                        <Text as="label" size="2" weight="medium" className="block mb-1">
+                          内部控制端口
+                        </Text>
+                        <TextField.Root
+                          type="number"
+                          placeholder="默认: 27888"
+                          value={formControlPort}
+                          onChange={(e) => setFormControlPort(e.target.value === "" ? "" : Number(e.target.value))}
+                        />
+                        <Text size="1" color="gray" className="block mt-1">
+                          节点间维持通信的内部端口
+                        </Text>
+                      </div>
+                    </div>
+
+                    <div>
+                      <Text as="label" size="2" weight="bold" className="block mb-1">
+                        内网本地服务目标端口 *
+                      </Text>
+                      <TextField.Root
+                        type="number"
+                        placeholder="例如：8080 (当前内网机器上的服务端口)"
+                        value={formTargetPort}
+                        onChange={(e) => setFormTargetPort(e.target.value === "" ? "" : Number(e.target.value))}
+                      />
+                      <Text size="1" color="gray" className="block mt-1">
+                        数据穿透后送达当前内网节点的 127.0.0.1 目标端口
+                      </Text>
+                    </div>
                   </div>
                 ) : (
-                  <Text size="1" color="gray" className="block pt-1">
-                    将请求直接转发至该小鸡节点本机的指定端口 (127.0.0.1)。
-                  </Text>
-                )}
+                  /* 原正向直接转发表单 */
+                  <div className="space-y-2 pt-1 border-t border-gray-200/60 dark:border-gray-700/60">
+                    <Text as="label" size="2" weight="bold" className="block">
+                      {t("tunnel.targetType", "远程目标类型")}
+                    </Text>
 
-                <div className="pt-2">
-                  <Text as="label" size="2" weight="medium" className="block mb-1">
-                    {t("tunnel.targetPort", "目标端口")} *
-                  </Text>
-                  <TextField.Root
-                    type="number"
-                    placeholder="例如：80 或 22"
-                    value={formTargetPort}
-                    onChange={(e) => setFormTargetPort(e.target.value === "" ? "" : Number(e.target.value))}
-                  />
-                </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setFormTargetType("local");
+                          setFormTargetHost("127.0.0.1");
+                        }}
+                        className={`flex items-center justify-center gap-2 p-2 rounded-md border text-sm font-medium transition-colors ${
+                          formTargetType === "local"
+                            ? "border-blue-500 bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300 dark:border-blue-700"
+                            : "border-gray-200 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-700 dark:text-gray-300"
+                        }`}
+                      >
+                        <Server className="w-4 h-4" />
+                        <span>本机 (127.0.0.1)</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setFormTargetType("custom");
+                          if (formTargetHost === "127.0.0.1") {
+                            setFormTargetHost("");
+                          }
+                        }}
+                        className={`flex items-center justify-center gap-2 p-2 rounded-md border text-sm font-medium transition-colors ${
+                          formTargetType === "custom"
+                            ? "border-blue-500 bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300 dark:border-blue-700"
+                            : "border-gray-200 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-700 dark:text-gray-300"
+                        }`}
+                      >
+                        <Globe className="w-4 h-4" />
+                        <span>自定义目标 (IP / 域名)</span>
+                      </button>
+                    </div>
+
+                    {formTargetType === "custom" ? (
+                      <div className="pt-2">
+                        <Text as="label" size="2" weight="medium" className="block mb-1">
+                          {t("tunnel.targetHost", "目标主机")} *
+                        </Text>
+                        <TextField.Root
+                          placeholder={t("tunnel.targetHostPlaceholder", "例如：192.168.1.100 或 example.internal")}
+                          value={formTargetHost}
+                          onChange={(e) => setFormTargetHost(e.target.value)}
+                        />
+                      </div>
+                    ) : (
+                      <Text size="1" color="gray" className="block pt-1">
+                        将请求直接转发至该小鸡节点本机的指定端口 (127.0.0.1)。
+                      </Text>
+                    )}
+
+                    <div className="pt-2">
+                      <Text as="label" size="2" weight="medium" className="block mb-1">
+                        {t("tunnel.targetPort", "目标端口")} *
+                      </Text>
+                      <TextField.Root
+                        type="number"
+                        placeholder="例如：80 或 22"
+                        value={formTargetPort}
+                        onChange={(e) => setFormTargetPort(e.target.value === "" ? "" : Number(e.target.value))}
+                      />
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 

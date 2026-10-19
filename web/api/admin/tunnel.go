@@ -41,6 +41,14 @@ type TunnelRuleInput struct {
 	PublicKey  string `json:"public_key"`
 	ShortID    string `json:"short_id"`
 	Fingerprint string `json:"fingerprint"`
+
+	// 跨节点反向穿透专用字段
+	IsReverse        *bool  `json:"is_reverse"`
+	BridgeClientUUID string `json:"bridge_client_uuid"`
+	BridgeHost       string `json:"bridge_host"`
+	BridgePort       int    `json:"bridge_port"`
+	ControlPort      int    `json:"control_port"`
+	TunnelSecret     string `json:"tunnel_secret"`
 }
 
 // ListTunnels 获取指定节点或全部节点的隧道与代理规则列表
@@ -148,6 +156,36 @@ func CreateTunnel(c *gin.Context) {
 		enabled = *input.Enabled
 	}
 
+	// 跨节点反向穿透逻辑
+	isReverse := false
+	if input.IsReverse != nil {
+		isReverse = *input.IsReverse
+	}
+	bridgeClientUUID := strings.TrimSpace(input.BridgeClientUUID)
+	bridgeHost := strings.TrimSpace(input.BridgeHost)
+	bridgePort := input.BridgePort
+	if isReverse && bridgePort <= 0 {
+		bridgePort = input.ListenPort
+	}
+	controlPort := input.ControlPort
+	if isReverse && controlPort <= 0 {
+		controlPort = 27888
+	}
+	tunnelSecret := strings.TrimSpace(input.TunnelSecret)
+	if isReverse && tunnelSecret == "" {
+		secBytes := make([]byte, 16)
+		_, _ = rand.Read(secBytes)
+		tunnelSecret = hex.EncodeToString(secBytes)
+	}
+
+	db := dbcore.GetDBInstance()
+	if isReverse && bridgeClientUUID != "" && bridgeClientUUID != "custom" && bridgeHost == "" {
+		var bridgeClient models.Client
+		if err := db.Where("uuid = ?", bridgeClientUUID).First(&bridgeClient).Error; err == nil {
+			bridgeHost = bridgeClient.IPv4
+		}
+	}
+
 	id := input.Id
 	if id == "" {
 		id = fmt.Sprintf("tunnel-%d", time.Now().UnixNano()/1e6)
@@ -175,18 +213,27 @@ func CreateTunnel(c *gin.Context) {
 		PublicKey:        input.PublicKey,
 		ShortID:          input.ShortID,
 		Fingerprint:      input.Fingerprint,
+		IsReverse:        isReverse,
+		BridgeClientUUID: bridgeClientUUID,
+		BridgeHost:       bridgeHost,
+		BridgePort:       bridgePort,
+		ControlPort:      controlPort,
+		TunnelSecret:     tunnelSecret,
 		CreatedAt:        time.Now().UTC(),
 		UpdatedAt:        time.Now().UTC(),
 	}
 
-	db := dbcore.GetDBInstance()
 	if err := db.Create(&rule).Error; err != nil {
 		api.RespondError(c, http.StatusInternalServerError, "Failed to create tunnel: "+err.Error())
 		return
 	}
 
-	// 实时下发至 Agent
+	// 实时下发至 Target Node (内网端)
 	_ = agent_runtime.SyncClientTunnels(rule.ClientUUID)
+	// 若为反向穿透且 Bridge 为已有节点，同时实时下发至 Bridge Node (公网端)
+	if rule.IsReverse && rule.BridgeClientUUID != "" && rule.BridgeClientUUID != "custom" {
+		_ = agent_runtime.SyncClientTunnels(rule.BridgeClientUUID)
+	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"status":  "success",
@@ -270,6 +317,34 @@ func UpdateTunnel(c *gin.Context) {
 	if input.Fingerprint != "" {
 		rule.Fingerprint = input.Fingerprint
 	}
+
+	// 更新反向穿透字段
+	oldBridgeUUID := rule.BridgeClientUUID
+	if input.IsReverse != nil {
+		rule.IsReverse = *input.IsReverse
+	}
+	if input.BridgeClientUUID != "" {
+		rule.BridgeClientUUID = input.BridgeClientUUID
+	}
+	if input.BridgeHost != "" {
+		rule.BridgeHost = input.BridgeHost
+	}
+	if rule.IsReverse && rule.BridgeClientUUID != "" && rule.BridgeClientUUID != "custom" && rule.BridgeHost == "" {
+		var bridgeClient models.Client
+		if err := db.Where("uuid = ?", rule.BridgeClientUUID).First(&bridgeClient).Error; err == nil {
+			rule.BridgeHost = bridgeClient.IPv4
+		}
+	}
+	if input.BridgePort > 0 {
+		rule.BridgePort = input.BridgePort
+	}
+	if input.ControlPort > 0 {
+		rule.ControlPort = input.ControlPort
+	}
+	if input.TunnelSecret != "" {
+		rule.TunnelSecret = input.TunnelSecret
+	}
+
 	rule.UpdatedAt = time.Now().UTC()
 
 	if err := db.Save(&rule).Error; err != nil {
@@ -278,6 +353,12 @@ func UpdateTunnel(c *gin.Context) {
 	}
 
 	_ = agent_runtime.SyncClientTunnels(rule.ClientUUID)
+	if rule.IsReverse && rule.BridgeClientUUID != "" && rule.BridgeClientUUID != "custom" {
+		_ = agent_runtime.SyncClientTunnels(rule.BridgeClientUUID)
+	}
+	if oldBridgeUUID != "" && oldBridgeUUID != rule.BridgeClientUUID && oldBridgeUUID != "custom" {
+		_ = agent_runtime.SyncClientTunnels(oldBridgeUUID)
+	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"status":  "success",
@@ -297,12 +378,18 @@ func DeleteTunnel(c *gin.Context) {
 	}
 
 	clientUUID := rule.ClientUUID
+	bridgeUUID := rule.BridgeClientUUID
+	isReverse := rule.IsReverse
+
 	if err := db.Delete(&rule).Error; err != nil {
 		api.RespondError(c, http.StatusInternalServerError, "Failed to delete tunnel: "+err.Error())
 		return
 	}
 
 	_ = agent_runtime.SyncClientTunnels(clientUUID)
+	if isReverse && bridgeUUID != "" && bridgeUUID != "custom" {
+		_ = agent_runtime.SyncClientTunnels(bridgeUUID)
+	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"status":  "success",
@@ -336,6 +423,9 @@ func ToggleTunnel(c *gin.Context) {
 	}
 
 	_ = agent_runtime.SyncClientTunnels(rule.ClientUUID)
+	if rule.IsReverse && rule.BridgeClientUUID != "" && rule.BridgeClientUUID != "custom" {
+		_ = agent_runtime.SyncClientTunnels(rule.BridgeClientUUID)
+	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"status":  "success",

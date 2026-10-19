@@ -29,6 +29,14 @@ type TunnelRule struct {
 	ShortID    string `json:"short_id" gorm:"type:varchar(64)"` // Reality Short ID
 	Fingerprint string `json:"fingerprint" gorm:"type:varchar(64);default:'ios'"` // Reality 客户端 TLS 指纹 (ios, edge, chrome, random)
 
+	// 跨节点反向穿透专用字段 (Reverse Proxy / NAT Traversal)
+	IsReverse        bool   `json:"is_reverse" gorm:"default:false"`
+	BridgeClientUUID string `json:"bridge_client_uuid" gorm:"type:varchar(64);index"` // 公网桥接节点 ClientUUID ("custom" 表示自定义公网机)
+	BridgeHost       string `json:"bridge_host" gorm:"type:varchar(255)"`              // 公网桥接节点外部 IP 或域名
+	BridgePort       int    `json:"bridge_port" gorm:"type:int"`                      // 公网对外开放监听的端口
+	ControlPort      int    `json:"control_port" gorm:"type:int;default:27888"`       // 节点间内部隧道建立端口
+	TunnelSecret     string `json:"tunnel_secret" gorm:"type:varchar(255)"`           // 节点间握手认证密钥
+
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }

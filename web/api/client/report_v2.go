@@ -71,6 +71,10 @@ func handleV2RPC(uuid string, req v2.Request, allowWait bool) v2.Response {
 		if err := ingestBasicInfo(uuid, params.Info, ""); err != nil {
 			return v2.Error(req.ID, -32000, "failed to save basic info", err.Error())
 		}
+		// 客户端上报基础信息时，主动触发隧道规则同步（确保在 WebSocket 降级为 HTTP POST 模式下重启也能收到规则）
+		go func() {
+			_ = agent_runtime.SyncClientTunnels(uuid)
+		}()
 		return v2.Success(req.ID, gin.H{"status": "success"})
 	case v2.MethodAgentPingResult:
 		var params v2.PingResultParams

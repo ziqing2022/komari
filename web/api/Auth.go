@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"crypto/subtle"
 	"database/sql"
 	"encoding/json"
 	"io"
@@ -176,7 +177,8 @@ func extractClientToken(c *gin.Context) string {
 	}
 
 	if c.Request.Method != http.MethodGet {
-		bodyBytes, err := io.ReadAll(c.Request.Body)
+		// 限制最多读取 1MB 请求体，防御无上限内存读取导致的 OOM DoS 攻击
+		bodyBytes, err := io.ReadAll(io.LimitReader(c.Request.Body, 1024*1024))
 		if err != nil {
 			return ""
 		}
@@ -221,5 +223,11 @@ func isApiKeyValid(apiKey string) bool {
 	if apiKeyConfig == "" || len(apiKeyConfig) < 12 {
 		return false
 	}
-	return apiKey == "Bearer "+apiKeyConfig
+
+	expected := "Bearer " + apiKeyConfig
+	if len(apiKey) != len(expected) {
+		return false
+	}
+	// 使用恒定时间比对，抵御逐字节侧信道时序攻击
+	return subtle.ConstantTimeCompare([]byte(apiKey), []byte(expected)) == 1
 }

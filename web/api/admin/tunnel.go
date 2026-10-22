@@ -120,8 +120,8 @@ func CreateTunnel(c *gin.Context) {
 		return
 	}
 
-	if input.ClientUUID == "" || input.Name == "" || input.ListenPort <= 0 {
-		api.RespondError(c, http.StatusBadRequest, "Client, name and valid listen port are required")
+	if input.ClientUUID == "" || input.Name == "" || input.ListenPort <= 0 || input.ListenPort > 65535 {
+		api.RespondError(c, http.StatusBadRequest, "Client, name and valid listen port (1-65535) are required")
 		return
 	}
 
@@ -141,6 +141,10 @@ func CreateTunnel(c *gin.Context) {
 	targetPort := input.TargetPort
 	if targetPort <= 0 {
 		targetPort = input.ListenPort
+	}
+	if targetPort > 65535 {
+		api.RespondError(c, http.StatusBadRequest, "Target port must be between 1 and 65535")
+		return
 	}
 	protocol := strings.ToLower(strings.TrimSpace(input.Protocol))
 	if protocol == "" {
@@ -167,9 +171,17 @@ func CreateTunnel(c *gin.Context) {
 	if isReverse && bridgePort <= 0 {
 		bridgePort = input.ListenPort
 	}
+	if isReverse && (bridgePort <= 0 || bridgePort > 65535) {
+		api.RespondError(c, http.StatusBadRequest, "Bridge port must be between 1 and 65535")
+		return
+	}
 	controlPort := input.ControlPort
 	if isReverse && controlPort <= 0 {
 		controlPort = 27888
+	}
+	if isReverse && (controlPort <= 0 || controlPort > 65535) {
+		api.RespondError(c, http.StatusBadRequest, "Control port must be between 1 and 65535")
+		return
 	}
 	tunnelSecret := strings.TrimSpace(input.TunnelSecret)
 	if isReverse && tunnelSecret == "" {
@@ -265,6 +277,10 @@ func UpdateTunnel(c *gin.Context) {
 		rule.RuleType = strings.ToLower(input.RuleType)
 	}
 	if input.ListenPort > 0 {
+		if input.ListenPort > 65535 {
+			api.RespondError(c, http.StatusBadRequest, "Listen port must be between 1 and 65535")
+			return
+		}
 		rule.ListenPort = input.ListenPort
 	}
 	if input.Protocol != "" {
@@ -280,6 +296,10 @@ func UpdateTunnel(c *gin.Context) {
 		rule.TargetHost = "127.0.0.1"
 	}
 	if input.TargetPort > 0 {
+		if input.TargetPort > 65535 {
+			api.RespondError(c, http.StatusBadRequest, "Target port must be between 1 and 65535")
+			return
+		}
 		rule.TargetPort = input.TargetPort
 	}
 	if input.AutoOpenFirewall != nil {
@@ -336,9 +356,17 @@ func UpdateTunnel(c *gin.Context) {
 		}
 	}
 	if input.BridgePort > 0 {
+		if input.BridgePort > 65535 {
+			api.RespondError(c, http.StatusBadRequest, "Bridge port must be between 1 and 65535")
+			return
+		}
 		rule.BridgePort = input.BridgePort
 	}
 	if input.ControlPort > 0 {
+		if input.ControlPort > 65535 {
+			api.RespondError(c, http.StatusBadRequest, "Control port must be between 1 and 65535")
+			return
+		}
 		rule.ControlPort = input.ControlPort
 	}
 	if input.TunnelSecret != "" {

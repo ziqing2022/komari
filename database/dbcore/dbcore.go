@@ -266,7 +266,16 @@ func backupOnVersionUpgrade() {
 	tsName := time.Now().UTC().Format("20060102-150405")
 	bakPath := filepath.Join(backupDir, fmt.Sprintf("upgrade-%s.zip", tsName))
 	backupZipPath := filepath.Join(".", "data", "backup.zip")
-	if zipErr := zipDirectoryExcluding("./data", bakPath, map[string]struct{}{backupZipPath: {}, backupDir: {}}); zipErr != nil {
+	metricsDBPath := filepath.Join(".", "data", "metrics.db")
+	metricsWalPath := filepath.Join(".", "data", "metrics.db-wal")
+	metricsShmPath := filepath.Join(".", "data", "metrics.db-shm")
+	if zipErr := zipDirectoryExcluding("./data", bakPath, map[string]struct{}{
+		backupZipPath:  {},
+		backupDir:      {},
+		metricsDBPath:  {},
+		metricsWalPath: {},
+		metricsShmPath: {},
+	}); zipErr != nil {
 		logger.Errorf("dbcore", "[upgrade-backup] failed to backup ./data before upgrade (from %q to %q): %v", prevVersion, versionID, zipErr)
 		return
 	}
@@ -358,12 +367,34 @@ func doInitialize() error {
 		if _, statErr := os.Stat(backupZipPath); statErr == nil {
 			// 4. 将当前数据快照保存到 ./data/backup/，并保留已有归档。
 			backupDir := filepath.Join(".", "data", "backup")
+			metricsDBPath := filepath.Join(".", "data", "metrics.db")
+			metricsWalPath := filepath.Join(".", "data", "metrics.db-wal")
+			metricsShmPath := filepath.Join(".", "data", "metrics.db-shm")
+
+			// 检查待恢复的 backup.zip 中是否包含 metrics.db
+			backupContainsMetrics := false
+			if zr, err := zip.OpenReader(backupZipPath); err == nil {
+				for _, f := range zr.File {
+					if f.Name == "metrics.db" {
+						backupContainsMetrics = true
+						break
+					}
+				}
+				_ = zr.Close()
+			}
+
 			if err := os.MkdirAll(backupDir, 0755); err != nil {
 				logger.Errorf("dbcore", "[restore] failed to create backup dir: %v", err)
 			} else {
 				tsName := time.Now().UTC().Format("20060102-150405")
 				bakPath := filepath.Join(backupDir, fmt.Sprintf("pre-restore-%s.zip", tsName))
-				if zipErr := zipDirectoryExcluding("./data", bakPath, map[string]struct{}{backupZipPath: {}, backupDir: {}}); zipErr != nil {
+				if zipErr := zipDirectoryExcluding("./data", bakPath, map[string]struct{}{
+					backupZipPath:  {},
+					backupDir:      {},
+					metricsDBPath:  {},
+					metricsWalPath: {},
+					metricsShmPath: {},
+				}); zipErr != nil {
 					logger.Errorf("dbcore", "[restore] failed to zip current data: %v", zipErr)
 				} else {
 					logger.Infof("dbcore", "[restore] current data zipped to %s", bakPath)
@@ -371,7 +402,18 @@ func doInitialize() error {
 			}
 
 			// 5. 删除数据文件，但保留归档目录和待恢复的 backup.zip。
-			if delErr := removeAllInDirExcept("./data", map[string]struct{}{backupZipPath: {}, backupDir: {}}); delErr != nil {
+			// 若待恢复包中未包含 metrics.db，则保留现有监控指标库，避免配置恢复导致历史监控丢失。
+			excludeClean := map[string]struct{}{
+				backupZipPath: {},
+				backupDir:     {},
+			}
+			if !backupContainsMetrics {
+				excludeClean[metricsDBPath] = struct{}{}
+				excludeClean[metricsWalPath] = struct{}{}
+				excludeClean[metricsShmPath] = struct{}{}
+			}
+
+			if delErr := removeAllInDirExcept("./data", excludeClean); delErr != nil {
 				logger.Errorf("dbcore", "[restore] failed to cleanup data dir: %v", delErr)
 			}
 

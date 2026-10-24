@@ -13,6 +13,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/komari-monitor/komari/cmd/flags"
 	"github.com/komari-monitor/komari/database/dbcore"
+	logger "github.com/komari-monitor/komari/utils/log"
 	"github.com/komari-monitor/komari/web/api"
 )
 
@@ -40,44 +41,59 @@ func copyFile(srcPath, destPath string) error {
 	return nil
 }
 
-// walkDirToZip 将 contentDir 的内容写入 zip writer。
-// 注意：contentDir 不应包含被 walk 的 zip 文件本身。
-func walkDirToZip(zipWriter *zip.Writer, contentDir string) error {
-	return filepath.Walk(contentDir, func(p string, info os.FileInfo, err error) error {
+// addFileToZip 流式将单个文件写入 zip，无需在磁盘中转多份拷贝
+func addFileToZip(zw *zip.Writer, srcPath, zipRelPath string, method uint16) error {
+	f, err := os.Open(srcPath)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	info, err := f.Stat()
+	if err != nil {
+		return err
+	}
+
+	header, err := zip.FileInfoHeader(info)
+	if err != nil {
+		return err
+	}
+	header.Name = filepath.ToSlash(zipRelPath)
+	header.Method = method
+	header.Modified = info.ModTime().UTC()
+
+	w, err := zw.CreateHeader(header)
+	if err != nil {
+		return err
+	}
+
+	_, err = io.Copy(w, f)
+	return err
+}
+
+// addDirToZip 流式将整个目录写入 zip
+func addDirToZip(zw *zip.Writer, srcDir, zipRelDir string) error {
+	return filepath.Walk(srcDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
-		rel, err := filepath.Rel(contentDir, p)
+		rel, err := filepath.Rel(srcDir, path)
 		if err != nil {
 			return err
 		}
 		if rel == "." {
 			return nil
 		}
-		zipPath := filepath.ToSlash(rel)
+		zipPath := filepath.ToSlash(filepath.Join(zipRelDir, rel))
 		if info.IsDir() {
-			_, err := zipWriter.CreateHeader(&zip.FileHeader{
+			_, err := zw.CreateHeader(&zip.FileHeader{
 				Name:     zipPath + "/",
 				Method:   zip.Deflate,
-				Modified: info.ModTime(),
+				Modified: info.ModTime().UTC(),
 			})
 			return err
 		}
-		f, err := os.Open(p)
-		if err != nil {
-			return err
-		}
-		defer f.Close()
-		w, err := zipWriter.CreateHeader(&zip.FileHeader{
-			Name:     zipPath,
-			Method:   zip.Deflate,
-			Modified: info.ModTime(),
-		})
-		if err != nil {
-			return err
-		}
-		_, err = io.Copy(w, f)
-		return err
+		return addFileToZip(zw, path, zipPath, zip.Deflate)
 	})
 }
 
@@ -98,7 +114,6 @@ func writeBackupMarkup(zipWriter *zip.Writer) error {
 }
 
 // backupSQLiteTo 使用 SQLite VACUUM INTO 将当前数据库一致性备份到指定路径。
-// destDBPath 会先删除以防 SQLite 报 "output file already exists"。
 func backupSQLiteTo(destDBPath string) error {
 	if err := os.MkdirAll(filepath.Dir(destDBPath), 0o755); err != nil {
 		return fmt.Errorf("failed to create parent directory for db: %v", err)
@@ -113,136 +128,178 @@ func backupSQLiteTo(destDBPath string) error {
 		return fmt.Errorf("failed to get underlying database connection: %v", err)
 	}
 
+	// 优先执行 PASSIVE checkpoint，将 WAL 中的数据安全合并到数据库主文件
+	_, _ = sqlDB.Exec("PRAGMA wal_checkpoint(PASSIVE);")
+
 	// Windows 下 VACUUM INTO 传绝对路径时，统一使用正斜杠避免路径解析歧义
 	safePath := filepath.ToSlash(destDBPath)
 	safePath = strings.ReplaceAll(safePath, "'", "''")
 	vacuumSQL := fmt.Sprintf("VACUUM INTO '%s'", safePath)
 	if _, err = sqlDB.Exec(vacuumSQL); err != nil {
-		return fmt.Errorf("sqlite VACUUM INTO failed: %v", err)
+		logger.Warnf("admin", "sqlite VACUUM INTO failed (%v), falling back to wal_checkpoint and direct file copy", err)
+		_, _ = sqlDB.Exec("PRAGMA wal_checkpoint(TRUNCATE);")
+		srcDB := flags.DatabaseFile
+		if srcDB == "" {
+			srcDB = filepath.Join(".", "data", "komari.db")
+		}
+		if copyErr := copyFile(srcDB, destDBPath); copyErr != nil {
+			return fmt.Errorf("fallback db copy failed: %v (original vacuum error: %v)", copyErr, err)
+		}
 	}
 	return nil
 }
 
-// DownloadBackup 使用白名单打包 ./data 及数据库文件为 zip 并下载，
-// 同时归档到 ./data/backup/ 确保 Docker 挂载后备份文件可持久化。
-//
-// 归档文件由前端后续统一管理，服务端只负责生成并保存。
+// DownloadBackup 打包 ./data 下的核心配置及数据库文件为 zip 并下载。
+// 归档直接保存在 ./data/backup/ 物理磁盘中，坚决不写入 /tmp 内存盘，避免 RAM 撑满被 OOM 强杀。
 func DownloadBackup(c *gin.Context) {
 	backupDir := filepath.Join(".", "data", "backup")
-
-	// 1) 创建临时目录，内容隔离到 content/ 子目录
-	tempDir, err := os.MkdirTemp("", "komari-backup-*")
-	if err != nil {
-		api.RespondError(c, http.StatusInternalServerError, fmt.Sprintf("Error creating temporary directory: %v", err))
-		return
-	}
-	defer os.RemoveAll(tempDir)
-
-	contentDir := filepath.Join(tempDir, "content")
-	if err := os.MkdirAll(contentDir, 0o755); err != nil {
-		api.RespondError(c, http.StatusInternalServerError, fmt.Sprintf("Error creating content directory: %v", err))
-		return
-	}
-
-	// 2) 复制白名单文件到 content 目录
-	if err := copyWhitelistedFiles(contentDir); err != nil {
-		api.RespondError(c, http.StatusInternalServerError, fmt.Sprintf("Error copying data to temp: %v", err))
-		return
-	}
-
-	// 3) 处理数据库备份 -> content/komari.db
-	destDB := filepath.Join(contentDir, "komari.db")
-	dbFilePath := flags.DatabaseFile
-
-	if flags.IsSQLite() {
-		if err := backupSQLiteTo(destDB); err != nil {
-			api.RespondError(c, http.StatusInternalServerError, fmt.Sprintf("Error backing up sqlite database: %v", err))
-			return
-		}
-	} else if dbFilePath != "" {
-		if _, err := os.Stat(dbFilePath); err == nil {
-			if err := copyFile(dbFilePath, destDB); err != nil {
-				api.RespondError(c, http.StatusInternalServerError, fmt.Sprintf("Error copying database file: %v", err))
-				return
-			}
-		} else if !os.IsNotExist(err) {
-			api.RespondError(c, http.StatusInternalServerError, fmt.Sprintf("Error stating database file: %v", err))
-			return
-		}
-	}
-
-	// 4) 打包到临时 ZIP（放在 tempDir 下，与 content 平级）
-	tempZipPath := filepath.Join(tempDir, "output.zip")
-	tempZip, err := os.Create(tempZipPath)
-	if err != nil {
-		api.RespondError(c, http.StatusInternalServerError, fmt.Sprintf("Error creating temp zip: %v", err))
-		return
-	}
-	zipWriter := zip.NewWriter(tempZip)
-
-	// 只 walk content 目录，避免 output.zip 被打包进去
-	if err := walkDirToZip(zipWriter, contentDir); err != nil {
-		zipWriter.Close()
-		tempZip.Close()
-		api.RespondError(c, http.StatusInternalServerError, fmt.Sprintf("Error archiving temp folder: %v", err))
-		return
-	}
-
-	if err := writeBackupMarkup(zipWriter); err != nil {
-		zipWriter.Close()
-		tempZip.Close()
-		api.RespondError(c, http.StatusInternalServerError, fmt.Sprintf("Error writing backup markup: %v", err))
-		return
-	}
-
-	if err := zipWriter.Close(); err != nil {
-		tempZip.Close()
-		api.RespondError(c, http.StatusInternalServerError, fmt.Sprintf("Error finalizing zip: %v", err))
-		return
-	}
-	tempZip.Close()
-
-	// 5) 归档到 data/backup/。先写临时文件再原子发布。
-	ts := time.Now().UTC().Format("20060102-150405.000000")
-	archiveName := fmt.Sprintf("backup-%s.zip", ts)
-
-	archivePath := filepath.Join(backupDir, archiveName)
 	if err := os.MkdirAll(backupDir, 0755); err != nil {
 		api.RespondError(c, http.StatusInternalServerError, fmt.Sprintf("Error creating backup directory: %v", err))
 		return
 	}
 
-	archiveTemp, err := os.CreateTemp(backupDir, ".backup-*.tmp")
+	// 解析参数与大小决策
+	includeMetricsParam := strings.ToLower(strings.TrimSpace(c.Query("include_metrics")))
+	skipMetricsParam := strings.ToLower(strings.TrimSpace(c.Query("skip_metrics")))
+
+	metricsPath := filepath.Join(".", "data", "metrics.db")
+	var metricsSize int64
+	if fi, err := os.Stat(metricsPath); err == nil && !fi.IsDir() {
+		metricsSize = fi.Size()
+	}
+
+	// 决策是否打包 metrics.db:
+	// 1. 显式指定 ?include_metrics=false 或 ?skip_metrics=true 则排除
+	// 2. 显式指定 ?include_metrics=true 则包含
+	// 3. 默认情况下：若 metrics.db 超过 50MB（大体量多节点集群），自动排除监控指标，避免 CPU/RAM 暴毙；若 <= 50MB 则安全包含
+	shouldIncludeMetrics := false
+	if skipMetricsParam == "true" || includeMetricsParam == "false" || includeMetricsParam == "0" {
+		shouldIncludeMetrics = false
+	} else if includeMetricsParam == "true" || includeMetricsParam == "1" {
+		shouldIncludeMetrics = (metricsSize > 0)
+	} else {
+		const autoSkipMetricsThreshold = 50 * 1024 * 1024 // 50 MB
+		if metricsSize > 0 && metricsSize <= autoSkipMetricsThreshold {
+			shouldIncludeMetrics = true
+		} else if metricsSize > autoSkipMetricsThreshold {
+			logger.Infof("admin", "[backup] metrics.db is %.2f MB (exceeds 50MB threshold), safely omitting from core backup archive to avoid RAM/CPU exhaustion (pass ?include_metrics=true to force include)", float64(metricsSize)/(1024*1024))
+			shouldIncludeMetrics = false
+		}
+	}
+
+	// 1) 在物理磁盘 ./data/backup/ 下创建暂存文件，避免占用 Linux /tmp 内存盘（tmpfs）
+	ts := time.Now().UTC().Format("20060102-150405.000000")
+	archiveName := fmt.Sprintf("backup-%s.zip", ts)
+	archivePath := filepath.Join(backupDir, archiveName)
+
+	stagingZip, err := os.CreateTemp(backupDir, ".backup-staging-*.zip")
 	if err != nil {
-		api.RespondError(c, http.StatusInternalServerError, fmt.Sprintf("Error creating archive temp file: %v", err))
+		api.RespondError(c, http.StatusInternalServerError, fmt.Sprintf("Error creating staging zip file: %v", err))
 		return
 	}
-	archiveTempPath := archiveTemp.Name()
-	if err := archiveTemp.Close(); err != nil {
-		os.Remove(archiveTempPath)
-		api.RespondError(c, http.StatusInternalServerError, fmt.Sprintf("Error closing archive temp file: %v", err))
-		return
+	stagingPath := stagingZip.Name()
+	defer func() {
+		_ = stagingZip.Close()
+		_ = os.Remove(stagingPath)
+	}()
+
+	zipWriter := zip.NewWriter(stagingZip)
+
+	// 2) 逐项写入白名单中的静态配置/插件/主题（直接流式打包，0 中转磁盘占用）
+	for _, relPath := range backupWhitelist {
+		if relPath == "metrics.db" {
+			continue // metrics.db 单独处理
+		}
+		src := filepath.Join(".", "data", relPath)
+		info, err := os.Stat(src)
+		if err != nil {
+			continue
+		}
+		if info.IsDir() {
+			if err := addDirToZip(zipWriter, src, relPath); err != nil {
+				_ = zipWriter.Close()
+				api.RespondError(c, http.StatusInternalServerError, fmt.Sprintf("Error adding %s to zip: %v", relPath, err))
+				return
+			}
+		} else {
+			if err := addFileToZip(zipWriter, src, relPath, zip.Deflate); err != nil {
+				_ = zipWriter.Close()
+				api.RespondError(c, http.StatusInternalServerError, fmt.Sprintf("Error adding %s to zip: %v", relPath, err))
+				return
+			}
+		}
 	}
-	defer os.Remove(archiveTempPath)
-	if err := copyFile(tempZipPath, archiveTempPath); err != nil {
-		api.RespondError(c, http.StatusInternalServerError, fmt.Sprintf("Error archiving backup: %v", err))
-		return
+
+	// 3) 备份核心配置与节点数据库 (komari.db)
+	if flags.IsSQLite() {
+		tempDB, err := os.CreateTemp(backupDir, ".komari-tmp-*.db")
+		if err != nil {
+			_ = zipWriter.Close()
+			api.RespondError(c, http.StatusInternalServerError, fmt.Sprintf("Error creating temp db: %v", err))
+			return
+		}
+		tempDBPath := tempDB.Name()
+		_ = tempDB.Close()
+		defer os.Remove(tempDBPath)
+
+		if err := backupSQLiteTo(tempDBPath); err != nil {
+			_ = zipWriter.Close()
+			api.RespondError(c, http.StatusInternalServerError, fmt.Sprintf("Error backing up sqlite database: %v", err))
+			return
+		}
+		if err := addFileToZip(zipWriter, tempDBPath, "komari.db", zip.Deflate); err != nil {
+			_ = zipWriter.Close()
+			api.RespondError(c, http.StatusInternalServerError, fmt.Sprintf("Error adding komari.db to zip: %v", err))
+			return
+		}
+	} else if flags.DatabaseFile != "" {
+		if _, err := os.Stat(flags.DatabaseFile); err == nil {
+			if err := addFileToZip(zipWriter, flags.DatabaseFile, "komari.db", zip.Deflate); err != nil {
+				_ = zipWriter.Close()
+				api.RespondError(c, http.StatusInternalServerError, fmt.Sprintf("Error adding database file: %v", err))
+				return
+			}
+		}
 	}
-	if err := os.Rename(archiveTempPath, archivePath); err != nil {
-		api.RespondError(c, http.StatusInternalServerError, fmt.Sprintf("Error publishing backup archive: %v", err))
+
+	// 4) 若策略允许打包 metrics.db，采用 zip.Store（无压缩快速追加流），避免 zlib Deflate 持续吃满 CPU 并消耗数 GB 内存
+	if shouldIncludeMetrics {
+		method := uint16(zip.Store)
+		if metricsSize < 10*1024*1024 {
+			method = zip.Deflate
+		}
+		if err := addFileToZip(zipWriter, metricsPath, "metrics.db", method); err != nil {
+			logger.Warnf("admin", "failed to stream metrics.db to zip: %v", err)
+		}
+	}
+
+	// 5) 写入官方恢复标记文件
+	if err := writeBackupMarkup(zipWriter); err != nil {
+		_ = zipWriter.Close()
+		api.RespondError(c, http.StatusInternalServerError, fmt.Sprintf("Error writing backup markup: %v", err))
 		return
 	}
 
-	// 6) 发送给客户端
+	if err := zipWriter.Close(); err != nil {
+		api.RespondError(c, http.StatusInternalServerError, fmt.Sprintf("Error finalizing zip: %v", err))
+		return
+	}
+	if err := stagingZip.Close(); err != nil {
+		api.RespondError(c, http.StatusInternalServerError, fmt.Sprintf("Error closing staging zip: %v", err))
+		return
+	}
+
+	// 6) 将 staging zip 发布为正式归档文件
+	if err := os.Rename(stagingPath, archivePath); err != nil {
+		if err := copyFile(stagingPath, archivePath); err != nil {
+			api.RespondError(c, http.StatusInternalServerError, fmt.Sprintf("Error publishing backup archive: %v", err))
+			return
+		}
+	}
+
+	// 7) 流式发送给客户端
 	c.Writer.Header().Set("Content-Type", "application/zip")
 	c.Writer.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", archiveName))
 
-	zipReader, err := os.Open(tempZipPath)
-	if err != nil {
-		api.RespondError(c, http.StatusInternalServerError, fmt.Sprintf("Error reading temp zip: %v", err))
-		return
-	}
-	defer zipReader.Close()
-
-	http.ServeContent(c.Writer, c.Request, archiveName, time.Now(), zipReader)
+	c.File(archivePath)
 }

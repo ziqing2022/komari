@@ -28,6 +28,23 @@ type notificationState struct {
 // 映射关系：clientID (string) -> *notificationState
 var clientStates sync.Map
 
+type cachedNotificationConfig struct {
+	conf      *models.OfflineNotification
+	enabled   bool
+	expiresAt time.Time
+}
+
+var notiConfigCache sync.Map // clientID (string) -> cachedNotificationConfig
+
+// InvalidateNotificationConfigCache 清除离线通知配置缓存，空字符串代表清空全部
+func InvalidateNotificationConfigCache(clientID string) {
+	if clientID == "" {
+		notiConfigCache = sync.Map{}
+	} else {
+		notiConfigCache.Delete(clientID)
+	}
+}
+
 // getNotificationConfig 获取指定客户端的通知配置。
 // 返回配置对象和一个布尔值，指示全局和该客户端是否启用通知。
 func getNotificationConfig(clientID string) (*models.OfflineNotification, bool) {
@@ -36,13 +53,30 @@ func getNotificationConfig(clientID string) (*models.OfflineNotification, bool) 
 		return nil, false
 	}
 
+	now := time.Now()
+	if v, ok := notiConfigCache.Load(clientID); ok {
+		c := v.(cachedNotificationConfig)
+		if now.Before(c.expiresAt) {
+			return c.conf, c.enabled
+		}
+	}
+
 	notiConf := models.OfflineNotification{Client: clientID}
 	db := dbcore.GetDBInstance()
 	if err := db.Model(&models.OfflineNotification{}).Where("client = ?", clientID).First(&notiConf).Error; err != nil {
-		// 未显式配置时默认不开启，避免只读校验时发起 FirstOrCreate 写事务造成高频 SQLite 锁争抢
+		notiConfigCache.Store(clientID, cachedNotificationConfig{
+			conf:      nil,
+			enabled:   false,
+			expiresAt: now.Add(2 * time.Minute),
+		})
 		return nil, false
 	}
 
+	notiConfigCache.Store(clientID, cachedNotificationConfig{
+		conf:      &notiConf,
+		enabled:   notiConf.Enable,
+		expiresAt: now.Add(2 * time.Minute),
+	})
 	return &notiConf, notiConf.Enable
 }
 

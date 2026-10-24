@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"sync"
 	"time"
 
 	"github.com/komari-monitor/komari/database/dbcore"
@@ -111,10 +112,23 @@ func DeleteAllSessions() error {
 	return nil
 }
 
+var sessionUpdateThrottle sync.Map // session (string) -> time.Time
+
 func UpdateLatest(session, useragent, ip string) error {
+	if session == "" {
+		return nil
+	}
+	now := time.Now().UTC()
+	if last, ok := sessionUpdateThrottle.Load(session); ok {
+		if lastTime, ok := last.(time.Time); ok && now.Sub(lastTime) < 2*time.Minute {
+			return nil
+		}
+	}
+	sessionUpdateThrottle.Store(session, now)
+
 	db := dbcore.GetDBInstance()
 	return db.Model(&models.Session{}).Where("session = ?", session).Updates(map[string]interface{}{
-		"latest_online":     time.Now().UTC(),
+		"latest_online":     now,
 		"latest_user_agent": useragent,
 		"latest_ip":         ip,
 	}).Error

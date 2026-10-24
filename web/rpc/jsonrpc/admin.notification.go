@@ -11,6 +11,7 @@ import (
 	"github.com/komari-monitor/komari/database/notification"
 	"github.com/komari-monitor/komari/pkg/rpc"
 	"github.com/komari-monitor/komari/utils/messageSender"
+	"github.com/komari-monitor/komari/utils/notifier"
 	"gorm.io/gorm/clause"
 )
 
@@ -203,6 +204,7 @@ func adminEditOfflineNotification(_ context.Context, req *rpc.JsonRpcRequest) (a
 	if err != nil {
 		return nil, rpc.MakeError(rpc.InternalError, "Failed to edit offline notifications: "+err.Error(), nil)
 	}
+	notifier.InvalidateNotificationConfigCache("")
 	return nil, nil
 }
 
@@ -225,6 +227,7 @@ func setOfflineNotificationEnable(req *rpc.JsonRpcRequest, enable bool) *rpc.Jso
 	if err != nil {
 		return rpc.MakeError(rpc.InternalError, "Failed to update offline notifications: "+err.Error(), nil)
 	}
+	notifier.InvalidateNotificationConfigCache("")
 	return nil
 }
 

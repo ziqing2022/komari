@@ -3,19 +3,40 @@ package clients
 import (
 	"fmt"
 	"math"
+	"sync"
 
 	"github.com/komari-monitor/komari/database/dbcore"
 	"github.com/komari-monitor/komari/database/models"
 	v2 "github.com/komari-monitor/komari/protocol/v2"
 )
 
+var tokenUUIDCache sync.Map // token (string) -> uuid (string)
+
+func InvalidateTokenCache(token string) {
+	if token != "" {
+		tokenUUIDCache.Delete(token)
+	}
+}
+
+func ClearTokenCache() {
+	tokenUUIDCache = sync.Map{}
+}
+
 func GetClientUUIDByToken(token string) (clientUUID string, err error) {
+	if token == "" {
+		return "", fmt.Errorf("token is empty")
+	}
+	if v, ok := tokenUUIDCache.Load(token); ok {
+		return v.(string), nil
+	}
+
 	db := dbcore.GetDBInstance()
 	var client models.Client
 	err = db.Where("token = ?", token).First(&client).Error
 	if err != nil {
 		return "", err
 	}
+	tokenUUIDCache.Store(token, client.UUID)
 	return client.UUID, nil
 }
 

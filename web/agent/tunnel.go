@@ -2,11 +2,68 @@ package agent
 
 import (
 	"fmt"
+	"sync"
 
 	"github.com/komari-monitor/komari/database/dbcore"
 	"github.com/komari-monitor/komari/database/models"
 	v2 "github.com/komari-monitor/komari/protocol/v2"
 )
+
+var (
+	tunnelRulesMu         sync.RWMutex
+	targetRulesCache      map[string][]models.TunnelRule // clientUUID -> rules
+	bridgeRulesCache      map[string][]models.TunnelRule // bridgeClientUUID -> rules
+	tunnelRulesCacheReady bool
+)
+
+// InvalidateTunnelRulesCache 清除/刷新隧道规则缓存
+func InvalidateTunnelRulesCache() {
+	tunnelRulesMu.Lock()
+	tunnelRulesCacheReady = false
+	tunnelRulesMu.Unlock()
+}
+
+func getCachedRules(clientUUID string) ([]models.TunnelRule, []models.TunnelRule, error) {
+	tunnelRulesMu.RLock()
+	ready := tunnelRulesCacheReady
+	var target []models.TunnelRule
+	var bridge []models.TunnelRule
+	if ready {
+		target = targetRulesCache[clientUUID]
+		bridge = bridgeRulesCache[clientUUID]
+	}
+	tunnelRulesMu.RUnlock()
+
+	if ready {
+		return target, bridge, nil
+	}
+
+	// 缓存未初始化或已失效，从数据库全量加载（隧道规则表体量通常极小，仅数条至数十条）
+	db := dbcore.GetDBInstance()
+	var allRules []models.TunnelRule
+	if err := db.Find(&allRules).Error; err != nil {
+		return nil, nil, err
+	}
+
+	newTarget := make(map[string][]models.TunnelRule)
+	newBridge := make(map[string][]models.TunnelRule)
+	for _, r := range allRules {
+		newTarget[r.ClientUUID] = append(newTarget[r.ClientUUID], r)
+		if r.IsReverse && r.BridgeClientUUID != "" {
+			newBridge[r.BridgeClientUUID] = append(newBridge[r.BridgeClientUUID], r)
+		}
+	}
+
+	tunnelRulesMu.Lock()
+	targetRulesCache = newTarget
+	bridgeRulesCache = newBridge
+	tunnelRulesCacheReady = true
+	target = targetRulesCache[clientUUID]
+	bridge = bridgeRulesCache[clientUUID]
+	tunnelRulesMu.Unlock()
+
+	return target, bridge, nil
+}
 
 // SyncClientTunnels 向指定客户端同步下发其配置的全部隧道规则
 func SyncClientTunnels(clientUUID string) error {
@@ -14,17 +71,13 @@ func SyncClientTunnels(clientUUID string) error {
 		return fmt.Errorf("client uuid is empty")
 	}
 
-	db := dbcore.GetDBInstance()
-	// 1. 本机作为 Target (服务源头或正向转发宿主) 的规则
-	var targetRules []models.TunnelRule
-	if err := db.Where("client_uuid = ?", clientUUID).Find(&targetRules).Error; err != nil {
+	targetRules, bridgeRules, err := getCachedRules(clientUUID)
+	if err != nil {
 		return err
 	}
 
-	// 2. 本机作为 Bridge (公网暴露宿主) 的反向穿透规则
-	var bridgeRules []models.TunnelRule
-	if err := db.Where("bridge_client_uuid = ? AND is_reverse = ?", clientUUID, true).Find(&bridgeRules).Error; err != nil {
-		return err
+	if len(targetRules) == 0 && len(bridgeRules) == 0 {
+		return nil
 	}
 
 	var protoRules []v2.TunnelRule

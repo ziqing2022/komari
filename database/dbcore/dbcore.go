@@ -177,8 +177,8 @@ var (
 const SystemVersionKey = "system_version"
 
 const (
-	mainSQLiteBusyTimeout       = 5 * time.Second
-	mainSQLiteCacheSizeKB       = 8 * 1024
+	mainSQLiteBusyTimeout       = 30 * time.Second
+	mainSQLiteCacheSizeKB       = 64 * 1024
 	mainSQLiteWALAutoCheckpoint = 256
 	mainSQLiteJournalSizeLimit  = 1 << 20
 )

@@ -241,6 +241,7 @@ func CreateTunnel(c *gin.Context) {
 	}
 
 	// 实时下发至 Target Node (内网端)
+	agent_runtime.InvalidateTunnelRulesCache()
 	_ = agent_runtime.SyncClientTunnels(rule.ClientUUID)
 	// 若为反向穿透且 Bridge 为已有节点，同时实时下发至 Bridge Node (公网端)
 	if rule.IsReverse && rule.BridgeClientUUID != "" && rule.BridgeClientUUID != "custom" {
@@ -380,6 +381,7 @@ func UpdateTunnel(c *gin.Context) {
 		return
 	}
 
+	agent_runtime.InvalidateTunnelRulesCache()
 	_ = agent_runtime.SyncClientTunnels(rule.ClientUUID)
 	if rule.IsReverse && rule.BridgeClientUUID != "" && rule.BridgeClientUUID != "custom" {
 		_ = agent_runtime.SyncClientTunnels(rule.BridgeClientUUID)
@@ -414,6 +416,7 @@ func DeleteTunnel(c *gin.Context) {
 		return
 	}
 
+	agent_runtime.InvalidateTunnelRulesCache()
 	_ = agent_runtime.SyncClientTunnels(clientUUID)
 	if isReverse && bridgeUUID != "" && bridgeUUID != "custom" {
 		_ = agent_runtime.SyncClientTunnels(bridgeUUID)
@@ -450,6 +453,7 @@ func ToggleTunnel(c *gin.Context) {
 		return
 	}
 
+	agent_runtime.InvalidateTunnelRulesCache()
 	_ = agent_runtime.SyncClientTunnels(rule.ClientUUID)
 	if rule.IsReverse && rule.BridgeClientUUID != "" && rule.BridgeClientUUID != "custom" {
 		_ = agent_runtime.SyncClientTunnels(rule.BridgeClientUUID)

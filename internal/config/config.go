@@ -22,44 +22,86 @@ func (ConfigItem) TableName() string {
 }
 
 var (
-	db    *gorm.DB
+	db          *gorm.DB
+	cacheMu     sync.RWMutex
+	configCache = make(map[string]string)
+	cacheLoaded bool
+
 	SetDb = func(gdb *gorm.DB) {
 		db = gdb
 		if err := db.AutoMigrate(&ConfigItem{}); err != nil {
 			panic("failed to migrate config item table: " + err.Error())
 		}
+		ReloadCache()
 	}
 )
 
-// GetAs 获取并转换为指定类型 (泛型)，支持数值类型自动转换
+// ReloadCache 从数据库中预加载全部配置到内存缓存中
+func ReloadCache() {
+	if db == nil {
+		return
+	}
+	var items []ConfigItem
+	if err := db.Find(&items).Error; err == nil {
+		cacheMu.Lock()
+		configCache = make(map[string]string, len(items))
+		for _, it := range items {
+			configCache[it.Key] = it.Value
+		}
+		cacheLoaded = true
+		cacheMu.Unlock()
+	}
+}
+
+// GetAs 获取并转换为指定类型 (泛型)，优先读取内存缓存，支持数值类型自动转换
 func GetAs[T any](key string, defaul ...any) (T, error) {
 	var t T
-	var item ConfigItem
 
-	err := db.First(&item, "key = ?", key).Error
-	if err != nil {
-		if len(defaul) > 0 {
-			// 尝试直接类型断言
-			if v, ok := defaul[0].(T); ok {
-				err = Set(key, v)
-				return v, err
+	cacheMu.RLock()
+	valStr, found := configCache[key]
+	isLoaded := cacheLoaded
+	cacheMu.RUnlock()
+
+	if !found {
+		if !isLoaded && db != nil {
+			ReloadCache()
+			cacheMu.RLock()
+			valStr, found = configCache[key]
+			cacheMu.RUnlock()
+		}
+	}
+
+	if !found {
+		var item ConfigItem
+		err := db.First(&item, "key = ?", key).Error
+		if err != nil {
+			if len(defaul) > 0 {
+				// 尝试直接类型断言
+				if v, ok := defaul[0].(T); ok {
+					err = Set(key, v)
+					return v, err
+				}
+				// 尝试类型转换
+				val := reflect.ValueOf(&t).Elem()
+				if err := convertAndSet(defaul[0], val); err != nil {
+					return t, fmt.Errorf("default value type mismatch: expected %T, got %T", t, defaul[0])
+				}
+				err = Set(key, t)
+				return t, err
 			}
-			// 尝试类型转换
-			val := reflect.ValueOf(&t).Elem()
-			if err := convertAndSet(defaul[0], val); err != nil {
-				return t, fmt.Errorf("default value type mismatch: expected %T, got %T", t, defaul[0])
-			}
-			err = Set(key, t)
 			return t, err
 		}
-		return t, err
+		valStr = item.Value
+		cacheMu.Lock()
+		configCache[key] = valStr
+		cacheMu.Unlock()
 	}
 
 	// 先尝试直接反序列化
-	if err = json.Unmarshal([]byte(item.Value), &t); err != nil {
+	if err := json.Unmarshal([]byte(valStr), &t); err != nil {
 		// 尝试通用解析后转换
 		var generic any
-		if err := json.Unmarshal([]byte(item.Value), &generic); err != nil {
+		if err := json.Unmarshal([]byte(valStr), &generic); err != nil {
 			return t, err
 		}
 		val := reflect.ValueOf(&t).Elem()
@@ -74,31 +116,50 @@ func GetAs[T any](key string, defaul ...any) (T, error) {
 // 如果 defaultValue 为 nil，则数据库不存在时不写入
 // 如果 defaultValue 不为 nil，则数据库不存在时写入默认值
 func GetMany(keys map[string]any) (map[string]any, error) {
-	var items []ConfigItem
 	result := make(map[string]any)
-	keyList := make([]string, 0, len(keys))
-	for k := range keys {
-		keyList = append(keyList, k)
+	missingKeys := make(map[string]any)
+
+	cacheMu.RLock()
+	for k, def := range keys {
+		if valStr, found := configCache[k]; found {
+			var parsed any
+			if err := json.Unmarshal([]byte(valStr), &parsed); err == nil {
+				result[k] = parsed
+				continue
+			}
+		}
+		missingKeys[k] = def
 	}
-	if len(keyList) == 0 {
+	cacheMu.RUnlock()
+
+	if len(missingKeys) == 0 {
 		return result, nil
+	}
+
+	var items []ConfigItem
+	keyList := make([]string, 0, len(missingKeys))
+	for k := range missingKeys {
+		keyList = append(keyList, k)
 	}
 	if err := db.Where("key IN ?", keyList).Find(&items).Error; err != nil {
 		return nil, err
 	}
 
 	foundKeys := make(map[string]bool)
+	cacheMu.Lock()
 	for _, item := range items {
+		configCache[item.Key] = item.Value
 		var parsed any
 		if err := json.Unmarshal([]byte(item.Value), &parsed); err == nil {
 			result[item.Key] = parsed
 			foundKeys[item.Key] = true
 		}
 	}
+	cacheMu.Unlock()
 
 	// 收集需要写入数据库的默认值
 	var toInsert []ConfigItem
-	for k, def := range keys {
+	for k, def := range missingKeys {
 		if _, found := foundKeys[k]; !found {
 			if def != nil {
 				result[k] = def
@@ -123,6 +184,12 @@ func GetMany(keys map[string]any) (map[string]any, error) {
 			DoUpdates: clause.AssignmentColumns([]string{"value"}),
 		}).Create(&toInsert).Error; err != nil {
 			logger.Warn("config", "batch insert default config failed", "error", err)
+		} else {
+			cacheMu.Lock()
+			for _, it := range toInsert {
+				configCache[it.Key] = it.Value
+			}
+			cacheMu.Unlock()
 		}
 	}
 
@@ -401,6 +468,10 @@ func Set(key string, value any) error {
 		return err
 	}
 
+	cacheMu.Lock()
+	configCache[key] = item.Value
+	cacheMu.Unlock()
+
 	newVal := map[string]any{key: value}
 	publishEvent(oldVal, newVal)
 	return nil
@@ -452,6 +523,12 @@ func SetMany(cst map[string]any) error {
 	if err != nil {
 		return err
 	}
+
+	cacheMu.Lock()
+	for _, it := range items {
+		configCache[it.Key] = it.Value
+	}
+	cacheMu.Unlock()
 
 	publishEvent(oldVal, newVal)
 	return nil

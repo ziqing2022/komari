@@ -38,8 +38,8 @@ func getNotificationConfig(clientID string) (*models.OfflineNotification, bool) 
 
 	notiConf := models.OfflineNotification{Client: clientID}
 	db := dbcore.GetDBInstance()
-	if err := db.Model(&models.OfflineNotification{}).Where("client = ?", clientID).FirstOrCreate(&notiConf).Error; err != nil {
-		logger.Errorf("notifier", "Failed to get or create offline notification config for client %s: %v", clientID, err)
+	if err := db.Model(&models.OfflineNotification{}).Where("client = ?", clientID).First(&notiConf).Error; err != nil {
+		// 未显式配置时默认不开启，避免只读校验时发起 FirstOrCreate 写事务造成高频 SQLite 锁争抢
 		return nil, false
 	}
 

@@ -215,6 +215,11 @@ func checkTokenAndGetUUID(token string) (string, error) {
 }
 
 func isApiKeyValid(apiKey string) bool {
+	apiKey = strings.TrimSpace(apiKey)
+	if apiKey == "" || !strings.HasPrefix(apiKey, "Bearer ") {
+		return false
+	}
+
 	apiKeyConfig, err := config.GetAs[string](config.ApiKeyKey, "")
 	if err != nil {
 		return false

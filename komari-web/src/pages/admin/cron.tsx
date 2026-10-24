@@ -558,7 +558,7 @@ const CronContent = () => {
   const fetchTaskLogs = async (taskId: string, silent = false) => {
     if (!silent) setLoadingLogs(true);
     try {
-      const res = await fetch(`/api/admin/cron/${encodeURIComponent(taskId)}/logs`);
+      const res = await fetch(`/api/admin/cron/${encodeURIComponent(taskId)}/logs?limit=500`);
       if (res.ok) {
         const json = await res.json();
         const logs: CronLog[] = Array.isArray(json?.logs) ? json.logs : Array.isArray(json?.data) ? json.data : [];

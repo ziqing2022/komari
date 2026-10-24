@@ -3,6 +3,7 @@ package admin
 import (
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -370,14 +371,44 @@ func GetCronTaskLogs(c *gin.Context) {
 	prefix3 := fmt.Sprintf("cron-cron-%s-%%", bareID)
 	prefix4 := fmt.Sprintf("task-%s-%%", bareID)
 
-	// 高效索引查询：匹配各类可能的前缀规则与历史任务，按创建时间倒序获取最近30条
-	_ = db.Select("task_id", "client", "result", "exit_code", "finished_at", "created_at").
-		Preload("ClientInfo").
+	// 解析分页与数量限制（默认 500 条，确保 200+ 机器集群单次完整批次不被截断，最大支持 2000 条）
+	limit := 500
+	if l := strings.TrimSpace(c.Query("limit")); l != "" {
+		if parsed, err := strconv.Atoi(l); err == nil && parsed > 0 {
+			if parsed > 2000 {
+				limit = 2000
+			} else {
+				limit = parsed
+			}
+		}
+	}
+
+	// 1. 先从轻量 tasks 表中精确锁定该定时任务最近执行的若干个批次 TaskId
+	var batchTaskIDs []string
+	_ = db.Model(&models.Task{}).
 		Where("task_id LIKE ? OR task_id LIKE ? OR task_id LIKE ? OR task_id LIKE ? OR task_id = ? OR task_id = ?",
 			prefix1, prefix2, prefix3, prefix4, task.Id, bareID).
-		Order("created_at desc").
-		Limit(30).
-		Find(&results).Error
+		Order("rowid desc").
+		Limit(10).
+		Pluck("task_id", &batchTaskIDs).Error
+
+	// 2. 使用 task_id IN (?) 命中单字段索引精确获取节点执行结果，彻底避免海量数据下的全表扫描
+	if len(batchTaskIDs) > 0 {
+		_ = db.Select("task_id", "client", "result", "exit_code", "finished_at", "created_at").
+			Preload("ClientInfo").
+			Where("task_id IN (?)", batchTaskIDs).
+			Order("created_at desc").
+			Limit(limit).
+			Find(&results).Error
+	} else {
+		_ = db.Select("task_id", "client", "result", "exit_code", "finished_at", "created_at").
+			Preload("ClientInfo").
+			Where("task_id LIKE ? OR task_id LIKE ? OR task_id LIKE ? OR task_id LIKE ? OR task_id = ? OR task_id = ?",
+				prefix1, prefix2, prefix3, prefix4, task.Id, bareID).
+			Order("created_at desc").
+			Limit(limit).
+			Find(&results).Error
+	}
 
 	var logs []gin.H
 	for _, res := range results {

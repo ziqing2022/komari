@@ -54,11 +54,10 @@ func ListCronTasks(c *gin.Context) {
 			if interval <= 0 {
 				interval = 30
 			}
-			// 自动校准滞后或异常倒挂的下次调度时间
+			// 自动校准滞后或异常倒挂的下次调度时间（纯内存计算返回，避免高频并发 GET 请求对单连接 SQLite 造成写锁饥饿与整体卡死）
 			if tasks[i].NextRunAt == nil || tasks[i].NextRunAt.Before(now) || (tasks[i].LastRunAt != nil && !tasks[i].NextRunAt.After(*tasks[i].LastRunAt)) {
 				nextRun := now.Add(time.Duration(interval) * time.Minute)
 				tasks[i].NextRunAt = &nextRun
-				_ = db.Model(&tasks[i]).Update("next_run_at", nextRun).Error
 			}
 		}
 	}
@@ -365,12 +364,17 @@ func GetCronTaskLogs(c *gin.Context) {
 
 	db := dbcore.GetDBInstance()
 	var results []models.TaskResult
-	prefix := fmt.Sprintf("cron-%s-%%", task.Id)
+	bareID := strings.TrimPrefix(strings.TrimPrefix(task.Id, "cron-"), "task-")
+	prefix1 := fmt.Sprintf("cron-%s-%%", bareID)
+	prefix2 := fmt.Sprintf("cron-%s-%%", task.Id)
+	prefix3 := fmt.Sprintf("cron-cron-%s-%%", bareID)
+	prefix4 := fmt.Sprintf("task-%s-%%", bareID)
 
-	// 高效索引查询：优先匹配精确前缀，仅拉取必要字段
+	// 高效索引查询：匹配各类可能的前缀规则与历史任务，按创建时间倒序获取最近30条
 	_ = db.Select("task_id", "client", "result", "exit_code", "finished_at", "created_at").
 		Preload("ClientInfo").
-		Where("task_id LIKE ? OR task_id = ?", prefix, task.Id).
+		Where("task_id LIKE ? OR task_id LIKE ? OR task_id LIKE ? OR task_id LIKE ? OR task_id = ? OR task_id = ?",
+			prefix1, prefix2, prefix3, prefix4, task.Id, bareID).
 		Order("created_at desc").
 		Limit(30).
 		Find(&results).Error
@@ -381,10 +385,19 @@ func GetCronTaskLogs(c *gin.Context) {
 		if res.ClientInfo.Name != "" {
 			clientName = res.ClientInfo.Name
 		}
-		exitCode := 0
-		if res.ExitCode != nil {
+		var exitCode any = nil
+		status := "success"
+		if res.FinishedAt == nil {
+			status = "running"
+		} else if res.ExitCode != nil {
 			exitCode = *res.ExitCode
+			if *res.ExitCode != 0 {
+				status = "failed"
+			}
+		} else {
+			exitCode = 0
 		}
+
 		output := strings.TrimSpace(res.Result)
 		if output == "" {
 			if res.FinishedAt == nil {
@@ -410,6 +423,7 @@ func GetCronTaskLogs(c *gin.Context) {
 			"finished_at":        finishedAtStr,
 			"end_time":           finishedAtStr,
 			"exit_code":          exitCode,
+			"status":             status,
 			"output":             output,
 			"target_nodes_count": 1,
 		})
@@ -435,6 +449,7 @@ func GetCronTaskLogs(c *gin.Context) {
 			"finished_at":        timeStr,
 			"end_time":           timeStr,
 			"exit_code":          exitCode,
+			"status":             "success",
 			"output":             output,
 			"target_nodes_count": len(task.TargetNodes),
 		})

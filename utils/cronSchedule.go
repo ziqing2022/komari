@@ -2,12 +2,10 @@ package utils
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
 
-	"github.com/gorilla/websocket"
 	"github.com/komari-monitor/komari/database/dbcore"
 	"github.com/komari-monitor/komari/database/models"
 	"github.com/komari-monitor/komari/internal/scheduler"
@@ -79,9 +77,12 @@ func ExecuteCronTask(task *models.CronTask) (string, error) {
 		}
 	}
 
-	taskId := fmt.Sprintf("cron-%s-%s", task.Id, GenerateRandomString(8))
+	bareID := strings.TrimPrefix(strings.TrimPrefix(task.Id, "cron-"), "task-")
+	taskId := fmt.Sprintf("cron-%s-%s", bareID, GenerateRandomString(8))
 	taskClients := append(append([]string{}, onlineClients...), queuedClients...)
 	taskClients = append(taskClients, offlineClients...)
+
+	now := time.Now().UTC()
 
 	// 3. 记录任务至数据库
 	if len(taskClients) > 0 {
@@ -101,6 +102,7 @@ func ExecuteCronTask(task *models.CronTask) (string, error) {
 				Result:     "",
 				ExitCode:   nil,
 				FinishedAt: nil,
+				CreatedAt:  now,
 			})
 		}
 		if len(taskResults) > 0 {
@@ -108,27 +110,15 @@ func ExecuteCronTask(task *models.CronTask) (string, error) {
 		}
 	}
 
-	// 4. WebSocket 下发给当前在线节点
+	// 4. 下发给在线节点与排队节点（统一通过 SafeConn + 超时与重试队列）
 	for _, uuid := range onlineClients {
-		payload, err := json.Marshal(v2.Request{
-			JSONRPC: v2.Version,
-			Method:  v2.MethodAgentExec,
-			Params:  v2.ExecParams{TaskID: taskId, Command: task.Command},
-		})
-		if err == nil {
-			if client := agent_runtime.GetConnectedClients()[uuid]; client != nil {
-				_ = client.WriteMessage(websocket.TextMessage, payload)
-			}
-		}
+		agent_runtime.DispatchV2Event(uuid, v2.MethodAgentExec, v2.ExecParams{TaskID: taskId, Command: task.Command})
 	}
-
-	// 5. 事件队列下发给排队中的节点
 	for _, uuid := range queuedClients {
 		agent_runtime.DispatchV2Event(uuid, v2.MethodAgentExec, v2.ExecParams{TaskID: taskId, Command: task.Command})
 	}
 
-	// 6. 离线节点登记
-	now := time.Now().UTC()
+	// 5. 离线节点登记
 	for _, uuid := range offlineClients {
 		exitCode := -1
 		_ = db.Model(&models.TaskResult{}).

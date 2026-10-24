@@ -283,11 +283,13 @@ func handleCronTaskResult(taskID, uuid string, exitCode int, result string) {
 
 	db := dbcore.GetDBInstance()
 	var task models.CronTask
-	if err := db.Where("id = ? OR id = ? OR id = ?", cronId, "cron-"+bareID, bareID).First(&task).Error; err == nil {
+	if err := db.Where("id = ? OR id = ? OR id = ? OR id = ?", cronId, "cron-"+bareID, "task-"+bareID, bareID).First(&task).Error; err == nil {
+		now := time.Now().UTC()
 		updates := map[string]interface{}{
 			"last_exit_code": exitCode,
 			"last_result":    result,
-			"updated_at":     time.Now().UTC(),
+			"last_run_at":    now,
+			"updated_at":     now,
 		}
 		_ = db.Model(&task).Updates(updates).Error
 

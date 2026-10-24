@@ -109,11 +109,19 @@ func (sc *SafeConn) readFrame() (int, []byte, error) {
 	}
 }
 
+// defaultWriteWait bounds outbound WebSocket frame writes to prevent deadlocks
+// when a client connection hangs or TCP window closes.
+const defaultWriteWait = 10 * time.Second
+
 // writeFrame runs the wsSend hook chain then writes one frame. A dropped
 // frame is silently skipped; a nil interceptor writes through immediately.
 func (sc *SafeConn) writeFrame(messageType int, data []byte) error {
 	sc.mu.Lock()
 	defer sc.mu.Unlock()
+	_ = sc.conn.SetWriteDeadline(time.Now().Add(defaultWriteWait))
+	defer func() {
+		_ = sc.conn.SetWriteDeadline(time.Time{})
+	}()
 	if sc.interceptor == nil || sc.info == nil {
 		return sc.conn.WriteMessage(messageType, data)
 	}
@@ -131,6 +139,9 @@ func (sc *SafeConn) WriteMessage(messageType int, data []byte) error {
 func (sc *SafeConn) WriteControl(messageType int, data []byte, deadline time.Time) error {
 	sc.mu.Lock()
 	defer sc.mu.Unlock()
+	if deadline.IsZero() {
+		deadline = time.Now().Add(defaultWriteWait)
+	}
 	if sc.interceptor == nil || sc.info == nil {
 		return sc.conn.WriteControl(messageType, data, deadline)
 	}

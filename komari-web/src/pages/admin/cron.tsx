@@ -62,6 +62,7 @@ export interface CronLog {
   finished_at?: string | null;
   end_time?: string | null;
   exit_code: number | null;
+  status?: "running" | "success" | "failed";
   output: string;
   target_nodes_count: number;
 }
@@ -114,6 +115,7 @@ const CronContent = () => {
   const [logsDialogOpen, setLogsDialogOpen] = useState(false);
   const [selectedTaskLogs, setSelectedTaskLogs] = useState<CronLog[]>([]);
   const [logsTaskName, setLogsTaskName] = useState("");
+  const [logsCurrentTaskId, setLogsCurrentTaskId] = useState<string | null>(null);
   const [loadingLogs, setLoadingLogs] = useState(false);
 
   const LOCAL_STORAGE_KEY = "komari_cron_tasks";
@@ -552,50 +554,43 @@ const CronContent = () => {
     }
   };
 
-  // View Logs: Instant Optimistic Rendering + Background Sync
-  const handleViewLogs = async (task: CronTask) => {
-    setLogsTaskName(task.name);
-    setLogsDialogOpen(true);
-
-    // 1. 毫秒级即时回显：若任务已有上次执行结果，立即组装首条记录秒级展示，避免用户等待转圈
-    if (task.last_run_at || task.last_result) {
-      setSelectedTaskLogs([
-        {
-          id: `log-${task.id}-instant`,
-          task_id: task.id,
-          task_name: task.name,
-          triggered_at: task.last_run_at || new Date().toISOString(),
-          start_time: task.last_run_at || new Date().toISOString(),
-          finished_at: task.last_run_at || new Date().toISOString(),
-          exit_code: task.last_exit_code ?? 0,
-          output: task.last_result || "任务已触发完成",
-          target_nodes_count: task.target_nodes.includes("all")
-            ? (nodeDetail?.length || 1)
-            : task.target_nodes.length,
-        },
-      ]);
-      setLoadingLogs(false);
-    } else {
-      setSelectedTaskLogs([]);
-      setLoadingLogs(true);
-    }
-
-    // 2. 异步静默拉取完整历史记录，拉取成功后平滑刷新
+  // Fetch task logs from API
+  const fetchTaskLogs = async (taskId: string, silent = false) => {
+    if (!silent) setLoadingLogs(true);
     try {
-      const res = await fetch(`/api/admin/cron/${task.id}/logs`);
+      const res = await fetch(`/api/admin/cron/${encodeURIComponent(taskId)}/logs`);
       if (res.ok) {
         const json = await res.json();
-        const logs = Array.isArray(json?.logs) ? json.logs : Array.isArray(json?.data) ? json.data : [];
-        if (logs.length > 0) {
-          setSelectedTaskLogs(logs);
-        }
+        const logs: CronLog[] = Array.isArray(json?.logs) ? json.logs : Array.isArray(json?.data) ? json.data : [];
+        setSelectedTaskLogs(logs);
       }
-    } catch {
-      // 保留即时回显数据，无需报错中断
+    } catch (e) {
+      console.warn("Failed to fetch logs:", e);
     } finally {
-      setLoadingLogs(false);
+      if (!silent) setLoadingLogs(false);
     }
   };
+
+  // View Logs: open dialog, record active task ID, and fetch latest records
+  const handleViewLogs = async (task: CronTask) => {
+    setLogsTaskName(task.name);
+    setLogsCurrentTaskId(task.id);
+    setLogsDialogOpen(true);
+    fetchTaskLogs(task.id, false);
+  };
+
+  // Auto-poll logs while dialog is open (fast 2.5s interval if any task is executing)
+  useEffect(() => {
+    if (!logsDialogOpen || !logsCurrentTaskId) return;
+
+    const hasRunning = selectedTaskLogs.some((l) => l.status === "running" || (!l.finished_at && !l.end_time));
+
+    const timer = setInterval(() => {
+      fetchTaskLogs(logsCurrentTaskId, true);
+    }, hasRunning ? 2500 : 8000);
+
+    return () => clearInterval(timer);
+  }, [logsDialogOpen, logsCurrentTaskId, selectedTaskLogs]);
 
 
 
@@ -1118,13 +1113,28 @@ const CronContent = () => {
       {/* LOGS MODAL */}
       <Dialog.Root open={logsDialogOpen} onOpenChange={setLogsDialogOpen}>
         <Dialog.Content className="max-w-3xl max-h-[80vh] flex flex-col">
-          <Dialog.Title className="flex items-center gap-2">
-            <Terminal size={18} />
-            <span>执行日志 - {logsTaskName}</span>
-          </Dialog.Title>
-          <Dialog.Description size="2" color="gray" className="mb-3">
-            查看该定时任务最近的执行历史记录与返回结果
-          </Dialog.Description>
+          <Flex justify="between" align="center" className="mb-3">
+            <div>
+              <Dialog.Title className="flex items-center gap-2">
+                <Terminal size={18} />
+                <span>执行日志 - {logsTaskName}</span>
+              </Dialog.Title>
+              <Dialog.Description size="2" color="gray">
+                查看该定时任务最近的执行历史记录与返回结果
+              </Dialog.Description>
+            </div>
+            <Button
+              size="1"
+              variant="soft"
+              color="gray"
+              onClick={() => logsCurrentTaskId && fetchTaskLogs(logsCurrentTaskId, false)}
+              disabled={loadingLogs}
+              className="flex items-center gap-1.5 cursor-pointer"
+            >
+              <RefreshCw size={14} className={loadingLogs ? "animate-spin" : ""} />
+              刷新日志
+            </Button>
+          </Flex>
 
           <div className="flex-1 overflow-y-auto space-y-4 pr-1">
             {loadingLogs ? (
@@ -1134,7 +1144,8 @@ const CronContent = () => {
             ) : (
               <div className="relative pl-6 border-l-2 border-border/60 ml-2 space-y-4 my-2">
                 {selectedTaskLogs.map((log) => {
-                  const isSuccess = log.exit_code === 0;
+                  const isRunning = log.status === "running" || (!log.finished_at && !log.end_time);
+                  const isSuccess = !isRunning && (log.exit_code === 0);
                   const rawTime = log.triggered_at || log.start_time;
                   let timeStr = t("common.just_now", "刚刚");
                   if (rawTime) {
@@ -1143,12 +1154,17 @@ const CronContent = () => {
                   }
 
                   let durationStr = "";
-                  if (log.start_time && (log.finished_at || log.end_time)) {
+                  if (log.start_time) {
                     const start = new Date(log.start_time).getTime();
-                    const end = new Date((log.finished_at || log.end_time)!).getTime();
-                    if (!isNaN(start) && !isNaN(end) && end >= start) {
-                      const diffSec = ((end - start) / 1000).toFixed(1);
-                      durationStr = `${diffSec}s`;
+                    if (isRunning) {
+                      const elapsedSec = Math.max(0, Math.floor((Date.now() - start) / 1000));
+                      durationStr = `已运行 ${elapsedSec}s`;
+                    } else if (log.finished_at || log.end_time) {
+                      const end = new Date((log.finished_at || log.end_time)!).getTime();
+                      if (!isNaN(start) && !isNaN(end) && end >= start) {
+                        const diffSec = ((end - start) / 1000).toFixed(1);
+                        durationStr = `耗时: ${diffSec}s`;
+                      }
                     }
                   }
 
@@ -1156,7 +1172,9 @@ const CronContent = () => {
                     <div key={log.id} className="relative group">
                       {/* Timeline dot */}
                       <div className="absolute -left-[31px] top-1 p-0.5 rounded-full bg-background">
-                        {isSuccess ? (
+                        {isRunning ? (
+                          <RefreshCw size={16} className="text-amber-500 animate-spin" />
+                        ) : isSuccess ? (
                           <CheckCircle2 size={16} className="text-emerald-500" />
                         ) : (
                           <AlertCircle size={16} className="text-rose-500" />
@@ -1170,8 +1188,8 @@ const CronContent = () => {
                               {timeStr}
                             </span>
                             {durationStr && (
-                              <Badge size="1" color="gray" variant="surface">
-                                耗时: {durationStr}
+                              <Badge size="1" color={isRunning ? "amber" : "gray"} variant="surface">
+                                {durationStr}
                               </Badge>
                             )}
                             {log.node_name && (
@@ -1181,8 +1199,21 @@ const CronContent = () => {
                             )}
                           </Flex>
                           <Flex align="center" gap="2">
-                            <Badge color={isSuccess ? "green" : "red"} variant="soft">
-                              {isSuccess ? "执行成功 (0)" : `失败 (${log.exit_code ?? -1})`}
+                            <Badge
+                              color={isRunning ? "amber" : isSuccess ? "green" : "red"}
+                              variant="soft"
+                              className="flex items-center gap-1"
+                            >
+                              {isRunning ? (
+                                <>
+                                  <RefreshCw size={12} className="animate-spin" />
+                                  执行中...
+                                </>
+                              ) : isSuccess ? (
+                                "执行成功 (0)"
+                              ) : (
+                                `失败 (${log.exit_code ?? -1})`
+                              )}
                             </Badge>
                             <IconButton
                               size="1"
@@ -1199,7 +1230,7 @@ const CronContent = () => {
                         </Flex>
 
                         <div className="bg-black/90 text-emerald-400 p-2.5 rounded font-mono text-xs overflow-x-auto whitespace-pre-wrap select-text max-h-48">
-                          {log.output || "[无标准输出]"}
+                          {log.output || (isRunning ? "[指令已成功下发至目标节点，正在等待输出回传...]" : "[无标准输出]")}
                         </div>
                       </div>
                     </div>

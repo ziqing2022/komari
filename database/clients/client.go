@@ -5,6 +5,7 @@ import (
 	"fmt"
 	logger "github.com/komari-monitor/komari/utils/log"
 	"math"
+	"sync"
 	"time"
 
 	"github.com/komari-monitor/komari/database/dbcore"
@@ -15,7 +16,26 @@ import (
 	"github.com/google/uuid"
 )
 
+var basicInfoFingerprints sync.Map // clientUUID (string) -> string fingerprint
+
+func InvalidateClientBasicInfoFingerprint(clientUUID string) {
+	if clientUUID != "" {
+		basicInfoFingerprints.Delete(clientUUID)
+	}
+}
+
+func clientInfoFingerprint(m map[string]interface{}) string {
+	return fmt.Sprintf("%v|%v|%v|%v|%v|%v|%v|%v|%v|%v|%v|%v|%v|%v|%v|%v",
+		m["cpu_name"], m["cpu_cores"], m["cpu_physical_cores"], m["arch"],
+		m["os"], m["kernel_version"], m["ipv4"], m["ipv6"],
+		m["mem_total"], m["swap_total"], m["disk_total"],
+		m["gpu_name"], m["virtualization"], m["version"],
+		m["region"], m["container_id"],
+	)
+}
+
 func DeleteClient(clientUuid string) error {
+	InvalidateClientBasicInfoFingerprint(clientUuid)
 	db := dbcore.GetDBInstance()
 	err := db.Delete(&models.Client{}, "uuid = ?", clientUuid).Error
 	if err != nil {
@@ -25,7 +45,6 @@ func DeleteClient(clientUuid string) error {
 }
 
 func SaveClientInfo(update map[string]interface{}) error {
-	db := dbcore.GetDBInstance()
 	clientUUID, ok := update["uuid"].(string)
 	if !ok || clientUUID == "" {
 		return fmt.Errorf("invalid client UUID")
@@ -36,6 +55,13 @@ func SaveClientInfo(update map[string]interface{}) error {
 		return fmt.Errorf("no fields to update")
 	}
 
+	fp := clientInfoFingerprint(update)
+	if prev, ok := basicInfoFingerprints.Load(clientUUID); ok && prev.(string) == fp {
+		// 客户端基础硬件与网络信息未发生变化，跳过高频 SQLite 磁盘写事务，避免锁争抢与性能抖动
+		return nil
+	}
+
+	db := dbcore.GetDBInstance()
 	update["updated_at"] = time.Now().UTC()
 
 	toFloat64 := func(value interface{}) (float64, bool) {
@@ -118,6 +144,7 @@ func SaveClientInfo(update map[string]interface{}) error {
 	if err != nil {
 		return err
 	}
+	basicInfoFingerprints.Store(clientUUID, fp)
 	return nil
 }
 

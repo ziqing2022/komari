@@ -76,6 +76,10 @@ type Store struct {
 	// the raw late-arrival window to pass.
 	coarseMu sync.RWMutex
 	coarse   map[coarseRollupKey]*coarseRollup
+	// defsMu protects cached metric definitions to avoid repeated database reads during batch ingestion.
+	defsMu   sync.RWMutex
+	defs     []Definition
+	defsInit bool
 	// mu protects closed state.
 	//
 	// mu 保护 closed 状态。
@@ -528,6 +532,7 @@ func (s *Store) UpsertMetric(ctx context.Context, def Definition) error {
 	if err != nil || def.RetentionDays != 0 {
 		return err
 	}
+	s.invalidateDefinitionsCache()
 	_, err = s.deleteSeries(ctx, Query{MetricName: def.Name})
 	return err
 }
@@ -553,6 +558,13 @@ func (s *Store) GetMetric(ctx context.Context, name string) (Definition, error) 
 	return def, err
 }
 
+func (s *Store) invalidateDefinitionsCache() {
+	s.defsMu.Lock()
+	s.defsInit = false
+	s.defs = nil
+	s.defsMu.Unlock()
+}
+
 // ListMetrics lists all metric definitions.
 //
 // ListMetrics 按名称升序列出所有指标定义。
@@ -560,6 +572,15 @@ func (s *Store) ListMetrics(ctx context.Context) ([]Definition, error) {
 	if err := s.ensureOpen(); err != nil {
 		return nil, err
 	}
+	s.defsMu.RLock()
+	if s.defsInit {
+		cached := make([]Definition, len(s.defs))
+		copy(cached, s.defs)
+		s.defsMu.RUnlock()
+		return cached, nil
+	}
+	s.defsMu.RUnlock()
+
 	rows, err := s.reader().QueryContext(ctx, fmt.Sprintf(
 		`SELECT name, type, unit, description, retention_days, metadata, created_at_milli, updated_at_milli FROM %s ORDER BY name ASC`,
 		s.tables.definitions,
@@ -577,7 +598,17 @@ func (s *Store) ListMetrics(ctx context.Context) ([]Definition, error) {
 		}
 		out = append(out, def)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	s.defsMu.Lock()
+	s.defs = make([]Definition, len(out))
+	copy(s.defs, out)
+	s.defsInit = true
+	s.defsMu.Unlock()
+
+	return out, nil
 }
 
 // DeleteMetric deletes a metric definition and all of its raw and rollup data.
@@ -607,6 +638,7 @@ func (s *Store) DeleteMetric(ctx context.Context, name string) error {
 	if err := tx.Commit(); err != nil {
 		return err
 	}
+	s.invalidateDefinitionsCache()
 	_, rawErr := s.deleteRawPoints(name, "", nil)
 	_, hotErr := s.deleteHotRollups(name, "", nil, nil)
 	_, coarseErr := s.deleteCoarseRollupsMatching(name, "", nil)
@@ -656,6 +688,7 @@ func (s *Store) UpdateMetricRetention(ctx context.Context, name string, retentio
 	if err := tx.Commit(); err != nil {
 		return Definition{}, err
 	}
+	s.invalidateDefinitionsCache()
 	return s.GetMetric(ctx, name)
 }
 

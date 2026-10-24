@@ -38,15 +38,21 @@ func readMaybeCompressedBody(r *http.Request) ([]byte, error) {
 	return io.ReadAll(r.Body)
 }
 
-func bindV2Params[T any](raw any, target *T) error {
-	b, err := json.Marshal(raw)
-	if err != nil {
-		return err
-	}
-	return json.Unmarshal(b, target)
+type inboundV2Request struct {
+	JSONRPC string          `json:"jsonrpc"`
+	Method  string          `json:"method"`
+	Params  json.RawMessage `json:"params,omitempty"`
+	ID      any             `json:"id,omitempty"`
 }
 
-func handleV2RPC(uuid string, req v2.Request, allowWait bool) v2.Response {
+func bindV2Params[T any](raw json.RawMessage, target *T) error {
+	if len(raw) == 0 {
+		return nil
+	}
+	return json.Unmarshal(raw, target)
+}
+
+func handleV2RPC(uuid string, req inboundV2Request, allowWait bool) v2.Response {
 	if req.JSONRPC != v2.Version {
 		return v2.Error(req.ID, -32600, "invalid jsonrpc version", nil)
 	}
@@ -145,7 +151,7 @@ func UploadV2RPC(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, v2.Error(nil, -32700, "invalid compressed body", err.Error()))
 		return
 	}
-	var req v2.Request
+	var req inboundV2Request
 	if err := json.Unmarshal(bytesBody, &req); err != nil {
 		c.JSON(http.StatusBadRequest, v2.Error(nil, -32700, "parse error", err.Error()))
 		return
@@ -180,7 +186,7 @@ func WebSocketV2RPC(c *gin.Context) {
 		conn.WriteJSON(v2.Error(nil, -32001, "invalid token", nil))
 		return
 	}
-	if oldConn, exists := agent_runtime.GetConnectedClients()[uuid]; exists {
+	if oldConn := agent_runtime.GetConnectedClient(uuid); oldConn != nil {
 		go oldConn.Close()
 	}
 	agent_runtime.SetConnectedClients(uuid, conn)
@@ -210,7 +216,7 @@ func WebSocketV2RPC(c *gin.Context) {
 			return
 		}
 		message = bytes.TrimSpace(message)
-		var req v2.Request
+		var req inboundV2Request
 		if err := json.Unmarshal(message, &req); err != nil {
 			conn.WriteJSON(v2.Error(nil, -32700, "parse error", err.Error()))
 			continue

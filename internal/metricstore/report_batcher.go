@@ -39,7 +39,10 @@ var (
 const (
 	reportBatchInterval     = 3 * time.Second
 	reportBatchQueueSize    = 512
-	pingBatchMaxRecords     = 512
+	reportBatchMaxReports   = 128
+	maxPendingReportsCap    = 1024
+	pingBatchMaxRecords     = 128
+	maxPendingPingsCap      = 1024
 	reportBatchWriteTimeout = 10 * time.Second
 	// Longer gaps have no reliable per-bucket traffic attribution.
 	maxTrafficReportGap = 15 * time.Minute
@@ -307,37 +310,60 @@ func writePendingReports(ctx context.Context, pending *[]v2.Report) error {
 	if len(*pending) == 0 {
 		return nil
 	}
-	batchSize := len(*pending)
+	// Prevent unbounded memory growth if persistent write errors or heavy backlog occur.
+	if len(*pending) > maxPendingReportsCap {
+		logger.Warnf("metricstore", "pending metric report queue exceeds limit (%d > %d), dropping oldest", len(*pending), maxPendingReportsCap)
+		*pending = (*pending)[len(*pending)-maxPendingReportsCap:]
+	}
+
+	var firstErr error
 	for len(*pending) > 0 {
+		batchSize := reportBatchMaxReports
 		if batchSize > len(*pending) {
 			batchSize = len(*pending)
 		}
 		writeCtx, cancel := context.WithTimeout(ctx, reportBatchWriteTimeout)
 		_, err := writeReportBatch(writeCtx, (*pending)[:batchSize])
 		cancel()
-		if err != nil {
-			return err
-		}
+		// Always advance *pending so a failed or timed-out batch does not cause memory explosion and perpetual retries.
 		*pending = (*pending)[batchSize:]
+		if err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			logger.Errorf("metricstore", "failed to write report batch of size %d: %v", batchSize, err)
+		}
 	}
-	return nil
+	return firstErr
 }
 
 func writePendingPingRecords(ctx context.Context, pending *[]models.PingRecord) error {
+	if len(*pending) == 0 {
+		return nil
+	}
+	if len(*pending) > maxPendingPingsCap {
+		logger.Warnf("metricstore", "pending ping queue exceeds limit (%d > %d), dropping oldest", len(*pending), maxPendingPingsCap)
+		*pending = (*pending)[len(*pending)-maxPendingPingsCap:]
+	}
+
+	var firstErr error
 	for len(*pending) > 0 {
-		batchSize := len(*pending)
-		if batchSize > pingBatchMaxRecords {
-			batchSize = pingBatchMaxRecords
+		batchSize := pingBatchMaxRecords
+		if batchSize > len(*pending) {
+			batchSize = len(*pending)
 		}
 		writeCtx, cancel := context.WithTimeout(ctx, reportBatchWriteTimeout)
 		err := writePingRecords(writeCtx, (*pending)[:batchSize])
 		cancel()
-		if err != nil {
-			return err
-		}
 		*pending = (*pending)[batchSize:]
+		if err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			logger.Errorf("metricstore", "failed to write ping batch of size %d: %v", batchSize, err)
+		}
 	}
-	return nil
+	return firstErr
 }
 
 func writeReportBatch(ctx context.Context, reports []v2.Report) ([]v2.Report, error) {

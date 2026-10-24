@@ -44,7 +44,7 @@ func ExecuteCronTask(task *models.CronTask) (string, error) {
 		for _, c := range clientRecords {
 			targetUUIDs = append(targetUUIDs, c.UUID)
 		}
-		for uuid := range agent_runtime.GetConnectedClients() {
+		for _, uuid := range agent_runtime.GetConnectedClientUUIDs() {
 			found := false
 			for _, u := range targetUUIDs {
 				if u == uuid {
@@ -68,7 +68,7 @@ func ExecuteCronTask(task *models.CronTask) (string, error) {
 	// 2. 统计节点在线状态
 	var onlineClients, queuedClients, offlineClients []string
 	for _, uuid := range targetUUIDs {
-		if client := agent_runtime.GetConnectedClients()[uuid]; client != nil {
+		if client := agent_runtime.GetConnectedClient(uuid); client != nil {
 			onlineClients = append(onlineClients, uuid)
 		} else if agent_runtime.IsAgentOnline(uuid) {
 			queuedClients = append(queuedClients, uuid)

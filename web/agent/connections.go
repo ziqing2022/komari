@@ -20,10 +20,37 @@ var (
 		id     int64
 		expire time.Time
 	})
-	mu = sync.RWMutex{}
+	recentReportsMu  = sync.RWMutex{}
+	mu               = sync.RWMutex{}
 )
 
-const recentReportRetention = time.Minute
+const (
+	recentReportRetention = time.Minute
+	maxRecentReportsPerClient = 60
+)
+
+func GetConnectedClient(uuid string) *connection.SafeConn {
+	mu.RLock()
+	defer mu.RUnlock()
+	return connectedClients[uuid]
+}
+
+func IsClientConnected(uuid string) bool {
+	mu.RLock()
+	defer mu.RUnlock()
+	_, ok := connectedClients[uuid]
+	return ok
+}
+
+func GetConnectedClientUUIDs() []string {
+	mu.RLock()
+	defer mu.RUnlock()
+	uuids := make([]string, 0, len(connectedClients))
+	for k := range connectedClients {
+		uuids = append(uuids, k)
+	}
+	return uuids
+}
 
 func GetConnectedClients() map[string]*connection.SafeConn {
 	mu.RLock()
@@ -147,36 +174,69 @@ func RecordReport(report v2.Report) {
 	} else {
 		report.UpdatedAt = report.UpdatedAt.UTC()
 	}
+
 	mu.Lock()
-	defer mu.Unlock()
 	if latest := latestReport[report.UUID]; latest == nil || !report.UpdatedAt.Before(latest.UpdatedAt) {
 		item := report
 		latestReport[report.UUID] = &item
 	}
+	mu.Unlock()
+
 	cutoff := time.Now().UTC().Add(-recentReportRetention)
-	reports := reportsAfter(recentReports[report.UUID], cutoff)
+	recentReportsMu.Lock()
+	defer recentReportsMu.Unlock()
+	reports := recentReports[report.UUID]
 	if report.UpdatedAt.Before(cutoff) {
-		recentReports[report.UUID] = reports
 		return
 	}
-	insertAt := sort.Search(len(reports), func(i int) bool {
-		return reports[i].UpdatedAt.After(report.UpdatedAt)
-	})
-	reports = append(reports, v2.Report{})
-	copy(reports[insertAt+1:], reports[insertAt:])
-	reports[insertAt] = report
+	// Normal fast path: reports arrive chronologically
+	if len(reports) == 0 || !report.UpdatedAt.Before(reports[len(reports)-1].UpdatedAt) {
+		reports = append(reports, report)
+	} else {
+		insertAt := sort.Search(len(reports), func(i int) bool {
+			return reports[i].UpdatedAt.After(report.UpdatedAt)
+		})
+		reports = append(reports, v2.Report{})
+		copy(reports[insertAt+1:], reports[insertAt:])
+		reports[insertAt] = report
+	}
+	// Fast trim from head without full reallocation
+	first := 0
+	for first < len(reports) && reports[first].UpdatedAt.Before(cutoff) {
+		first++
+	}
+	if first > 0 {
+		reports = reports[first:]
+	}
+	if len(reports) > maxRecentReportsPerClient {
+		reports = reports[len(reports)-maxRecentReportsPerClient:]
+	}
+	// Reset underlying array if capacity grew too much
+	if cap(reports) > maxRecentReportsPerClient*2 {
+		compacted := make([]v2.Report, len(reports))
+		copy(compacted, reports)
+		reports = compacted
+	}
 	recentReports[report.UUID] = reports
 }
 
 func GetRecentReports(uuid string) []v2.Report {
-	mu.Lock()
-	defer mu.Unlock()
-	reports := reportsAfter(recentReports[uuid], time.Now().UTC().Add(-recentReportRetention))
+	recentReportsMu.Lock()
+	defer recentReportsMu.Unlock()
+	cutoff := time.Now().UTC().Add(-recentReportRetention)
+	reports := recentReports[uuid]
+	first := 0
+	for first < len(reports) && reports[first].UpdatedAt.Before(cutoff) {
+		first++
+	}
+	if first > 0 {
+		reports = reports[first:]
+		recentReports[uuid] = reports
+	}
 	if len(reports) == 0 {
 		delete(recentReports, uuid)
 		return []v2.Report{}
 	}
-	recentReports[uuid] = reports
 	return append([]v2.Report(nil), reports...)
 }
 
@@ -192,7 +252,10 @@ func reportsAfter(reports []v2.Report, cutoff time.Time) []v2.Report {
 
 func DeleteLatestReport(uuid string) {
 	mu.Lock()
-	defer mu.Unlock()
 	delete(latestReport, uuid)
+	mu.Unlock()
+
+	recentReportsMu.Lock()
 	delete(recentReports, uuid)
+	recentReportsMu.Unlock()
 }

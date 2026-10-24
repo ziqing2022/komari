@@ -41,7 +41,7 @@ func getV2EventQueueLocked(uuid string) *v2EventQueue {
 }
 
 func DispatchV2Event(uuid, method string, params any) bool {
-	if conn := GetConnectedClients()[uuid]; conn != nil {
+	if conn := GetConnectedClient(uuid); conn != nil {
 		payload := v2.Request{JSONRPC: v2.Version, Method: method, Params: params}
 		if conn.WriteJSON(payload) == nil {
 			return true
@@ -55,7 +55,7 @@ func DispatchV2Event(uuid, method string, params any) bool {
 }
 
 func DispatchPing(uuid string, params v2.PingParams) bool {
-	if conn := GetConnectedClients()[uuid]; conn != nil {
+	if conn := GetConnectedClient(uuid); conn != nil {
 		payload := v2.Request{JSONRPC: v2.Version, Method: v2.MethodAgentPing, Params: params}
 		if conn.WriteJSON(payload) == nil {
 			return true
@@ -69,7 +69,7 @@ func DispatchPing(uuid string, params v2.PingParams) bool {
 }
 
 func IsAgentOnline(uuid string) bool {
-	if GetConnectedClients()[uuid] != nil {
+	if GetConnectedClient(uuid) != nil {
 		return true
 	}
 	return IsV2Client(uuid)
@@ -132,6 +132,12 @@ func coalesceV2EventLocked(q *v2EventQueue, event v2.Event) {
 
 func v2EventCoalesceKey(event v2.Event) string {
 	if event.Method == v2.MethodAgentTerminal {
+		if p, ok := event.Params.(v2.TerminalRequestParams); ok && p.RequestID != "" {
+			return event.Method + ":" + p.RequestID
+		}
+		if p, ok := event.Params.(*v2.TerminalRequestParams); ok && p != nil && p.RequestID != "" {
+			return event.Method + ":" + p.RequestID
+		}
 		var params v2.TerminalRequestParams
 		if err := bindV2EventParams(event.Params, &params); err == nil && params.RequestID != "" {
 			return event.Method + ":" + params.RequestID
@@ -140,6 +146,12 @@ func v2EventCoalesceKey(event v2.Event) string {
 	}
 	if event.Method != v2.MethodAgentPing {
 		return ""
+	}
+	if p, ok := event.Params.(v2.PingParams); ok && p.TaskID != 0 {
+		return fmt.Sprintf("%s:%d", event.Method, p.TaskID)
+	}
+	if p, ok := event.Params.(*v2.PingParams); ok && p != nil && p.TaskID != 0 {
+		return fmt.Sprintf("%s:%d", event.Method, p.TaskID)
 	}
 	var params v2.PingParams
 	if err := bindV2EventParams(event.Params, &params); err != nil || params.TaskID == 0 {

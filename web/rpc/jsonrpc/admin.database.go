@@ -3,10 +3,12 @@ package jsonrpc
 import (
 	"context"
 	"sync"
+	"time"
 
 	"github.com/komari-monitor/komari/cmd/flags"
 	"github.com/komari-monitor/komari/database/auditlog"
 	"github.com/komari-monitor/komari/database/dbcore"
+	"github.com/komari-monitor/komari/database/tasks"
 	"github.com/komari-monitor/komari/internal/metricstore"
 	"github.com/komari-monitor/komari/pkg/metric"
 	"github.com/komari-monitor/komari/pkg/rpc"
@@ -156,10 +158,17 @@ func maintainMainDatabase(ctx context.Context) databaseMaintenanceResult {
 
 	if !flags.IsSQLite() {
 		result.Error = "main database maintenance is only supported for SQLite"
-	} else if err := dbcore.ReclaimSpace(ctx); err != nil {
-		result.Error = err.Error()
 	} else {
-		result.Success = true
+		// 回收前先清理已过期的定时任务历史、孤儿任务与审计日志
+		_ = tasks.ClearTaskResultsByTimeBefore(time.Now().UTC().AddDate(0, 0, -7))
+		_ = tasks.CleanCronTaskHistory(50)
+		auditlog.RemoveOldLogs()
+
+		if err := dbcore.ReclaimSpace(ctx); err != nil {
+			result.Error = err.Error()
+		} else {
+			result.Success = true
+		}
 	}
 
 	after, err := dbcore.StorageSize()

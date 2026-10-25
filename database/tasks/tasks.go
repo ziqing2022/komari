@@ -1,6 +1,8 @@
 package tasks
 
 import (
+	"fmt"
+	"strings"
 	"time"
 
 	"github.com/komari-monitor/komari/database/dbcore"
@@ -84,5 +86,43 @@ func SaveTaskResult(taskId, clientId, result string, exitCode int, timestamp tim
 }
 
 func ClearTaskResultsByTimeBefore(before time.Time) error {
-	return dbcore.GetDBInstance().Where("created_at < ?", before.UTC()).Delete(&models.TaskResult{}).Error
+	db := dbcore.GetDBInstance()
+	if err := db.Where("created_at < ?", before.UTC()).Delete(&models.TaskResult{}).Error; err != nil {
+		return err
+	}
+	// 清理没有对应 task_results 的旧 task 记录，避免孤儿记录长期堆积
+	_ = db.Where("task_id NOT IN (SELECT DISTINCT task_id FROM task_results)").Delete(&models.Task{}).Error
+	return nil
+}
+
+// CleanCronTaskHistory 保留每个定时任务最近 maxBatches 个执行批次，清理更早的历史结果，防止高频定时任务打爆数据库
+func CleanCronTaskHistory(maxBatches int) error {
+	if maxBatches <= 0 {
+		maxBatches = 50
+	}
+	db := dbcore.GetDBInstance()
+
+	var cronTasks []models.CronTask
+	if err := db.Select("id").Find(&cronTasks).Error; err != nil {
+		return err
+	}
+
+	for _, ct := range cronTasks {
+		bareID := strings.TrimPrefix(strings.TrimPrefix(ct.Id, "cron-"), "task-")
+		prefix1 := fmt.Sprintf("cron-%s-%%", bareID)
+		prefix2 := fmt.Sprintf("cron-%s-%%", ct.Id)
+
+		var oldTaskIDs []string
+		_ = db.Model(&models.Task{}).
+			Where("task_id LIKE ? OR task_id LIKE ?", prefix1, prefix2).
+			Order("rowid desc").
+			Offset(maxBatches).
+			Pluck("task_id", &oldTaskIDs).Error
+
+		if len(oldTaskIDs) > 0 {
+			_ = db.Where("task_id IN (?)", oldTaskIDs).Delete(&models.TaskResult{}).Error
+			_ = db.Where("task_id IN (?)", oldTaskIDs).Delete(&models.Task{}).Error
+		}
+	}
+	return nil
 }

@@ -23,6 +23,21 @@ func StorageSize() (int64, error) {
 	return sqliteFileSetSize(resolveDatabaseFile())
 }
 
+// DropLegacyTablesIfExist 如果 komari.db 中仍残留旧版的 records, records_long_term, gpu_records, ping_records，
+// 则自动清理删除，避免旧版监控历史占用数百 MB 磁盘空间
+func DropLegacyTablesIfExist() {
+	db := GetDBInstance()
+	if db == nil {
+		return
+	}
+	legacyTables := []string{"records", "records_long_term", "gpu_records", "ping_records"}
+	for _, table := range legacyTables {
+		if db.Migrator().HasTable(table) {
+			_ = db.Migrator().DropTable(table)
+		}
+	}
+}
+
 // ReclaimSpace checkpoints the main database WAL and rewrites the SQLite file.
 func ReclaimSpace(ctx context.Context) error {
 	if !flags.IsSQLite() {
@@ -31,6 +46,8 @@ func ReclaimSpace(ctx context.Context) error {
 
 	maintenanceMu.Lock()
 	defer maintenanceMu.Unlock()
+
+	DropLegacyTablesIfExist()
 
 	db, err := GetDBInstance().DB()
 	if err != nil {

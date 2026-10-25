@@ -7,23 +7,26 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/komari-monitor/komari/cmd/flags"
 	"github.com/komari-monitor/komari/database"
 	"github.com/komari-monitor/komari/database/accounts"
 	"github.com/komari-monitor/komari/database/auditlog"
+	"github.com/komari-monitor/komari/database/dbcore"
 	"github.com/komari-monitor/komari/database/tasks"
 	"github.com/komari-monitor/komari/internal/config"
 	"github.com/komari-monitor/komari/internal/lifecycle"
 	"github.com/komari-monitor/komari/internal/metricstore"
 	"github.com/komari-monitor/komari/internal/plugin"
 	"github.com/komari-monitor/komari/internal/scheduler"
+	"github.com/komari-monitor/komari/utils"
 	"github.com/komari-monitor/komari/utils/geoip"
 	logger "github.com/komari-monitor/komari/utils/log"
 	"github.com/komari-monitor/komari/utils/notifier"
-	"github.com/komari-monitor/komari/utils"
 	"github.com/komari-monitor/komari/web/api"
 	"github.com/komari-monitor/komari/web/oauth"
 	recoveryweb "github.com/komari-monitor/komari/web/recovery"
@@ -201,17 +204,84 @@ func registerScheduledWork() {
 	if err := scheduler.AddFunc("notifier:expire", "0 0 9 * * *", notifier.CheckExpireScheduledWork); err != nil {
 		logger.ErrorArgs("server", "Failed to add expire notification task:", err)
 	}
+	// 每天凌晨 03:30 执行一次主数据库自动瘦身与空间回收（VACUUM）
+	if err := scheduler.AddContextFunc("database:maintenance", "0 30 3 * * *", true, scheduledDatabaseMaintenance); err != nil {
+		logger.ErrorArgs("server", "Failed to add database maintenance scheduled task:", err)
+	}
+
+	// 启动后异步检查：若数据库达到高水位（如升级或历史遗留的数十至数百 MB），自动执行一次自愈清理与压缩
+	go func() {
+		time.Sleep(30 * time.Second)
+		if flags.IsSQLite() {
+			if size, err := dbcore.StorageSize(); err == nil && size > 80*1024*1024 {
+				logger.Infof("server", "[db-maintenance] Database size is %.2f MB (>80MB threshold), automatically triggering initial space reclamation", float64(size)/(1024*1024))
+				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+				defer cancel()
+				scheduledDatabaseMaintenance(ctx)
+			}
+		}
+	}()
 }
 
-const taskResultRetentionDays = 30
+var (
+	lastAutoVacuumTime time.Time
+	autoVacuumMu       sync.Mutex
+)
+
+// scheduledDatabaseMaintenance 执行主数据库清理、旧表删除与物理磁盘空间回收 (VACUUM)
+func scheduledDatabaseMaintenance(ctx context.Context) {
+	autoVacuumMu.Lock()
+	defer autoVacuumMu.Unlock()
+
+	logger.Infof("server", "[db-maintenance] Starting scheduled database cleanup and vacuum...")
+	cleanupScheduledData()
+
+	if flags.IsSQLite() {
+		beforeSize, _ := dbcore.StorageSize()
+		if err := dbcore.ReclaimSpace(ctx); err != nil {
+			logger.Errorf("server", "[db-maintenance] Failed to reclaim database space: %v", err)
+			return
+		}
+		afterSize, _ := dbcore.StorageSize()
+		lastAutoVacuumTime = time.Now().UTC()
+		logger.Infof("server", "[db-maintenance] Database maintenance completed: before %.2f MB, after %.2f MB (freed %.2f MB)",
+			float64(beforeSize)/(1024*1024),
+			float64(afterSize)/(1024*1024),
+			float64(beforeSize-afterSize)/(1024*1024))
+	}
+}
 
 func cleanupScheduledData() {
-	before := time.Now().UTC().Add(-24 * time.Hour * taskResultRetentionDays)
+	// 1. 自动删除遗留旧表（如旧版残留的监控历史大表，新版已全部走 metrics.db）
+	dbcore.DropLegacyTablesIfExist()
+
+	// 2. 清理过期与超出批次上限的定时任务日志（默认保留7天、最多50批次）
+	retentionDays := 7
+	if customDays, err := config.GetAs[int]("task_retention_days", 7); err == nil && customDays > 0 {
+		retentionDays = customDays
+	}
+	before := time.Now().UTC().Add(-24 * time.Hour * time.Duration(retentionDays))
 	if err := tasks.ClearTaskResultsByTimeBefore(before); err != nil {
 		logger.Errorf("server", "Failed to clean expired task results: %v", err)
 	}
+	_ = tasks.CleanCronTaskHistory(50)
+
+	// 3. 清理审计日志与过期会话
 	auditlog.RemoveOldLogs()
 	accounts.RemoveExpiredSessions()
+
+	// 4. 高水位空间自愈：如果主数据库超过 80MB，且距离上次 VACUUM 超过 6 小时，自动在后台触发空间回收
+	if flags.IsSQLite() {
+		if size, err := dbcore.StorageSize(); err == nil && size > 80*1024*1024 {
+			if time.Since(lastAutoVacuumTime) > 6*time.Hour {
+				go func() {
+					ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+					defer cancel()
+					scheduledDatabaseMaintenance(ctx)
+				}()
+			}
+		}
+	}
 }
 
 func compactMetricStore(ctx context.Context) {

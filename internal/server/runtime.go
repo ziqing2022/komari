@@ -211,7 +211,8 @@ func registerScheduledWork() {
 
 	// 启动后异步检查：若数据库达到高水位（如升级或历史遗留的数十至数百 MB），自动执行一次自愈清理与压缩
 	go func() {
-		time.Sleep(30 * time.Second)
+		time.Sleep(10 * time.Second)
+		_ = tasks.CleanCronTaskHistory(2) // 启动后立即裁剪定时任务日志至近2次，杜绝历史积压爆库
 		if flags.IsSQLite() {
 			if size, err := dbcore.StorageSize(); err == nil && size > 80*1024*1024 {
 				logger.Infof("server", "[db-maintenance] Database size is %.2f MB (>80MB threshold), automatically triggering initial space reclamation", float64(size)/(1024*1024))
@@ -255,7 +256,7 @@ func cleanupScheduledData() {
 	// 1. 自动删除遗留旧表（如旧版残留的监控历史大表，新版已全部走 metrics.db）
 	dbcore.DropLegacyTablesIfExist()
 
-	// 2. 清理过期与超出批次上限的定时任务日志（默认保留7天、最多50批次）
+	// 2. 清理过期与超出批次上限的定时任务日志（默认保留7天、最多2批次）
 	retentionDays := 7
 	if customDays, err := config.GetAs[int]("task_retention_days", 7); err == nil && customDays > 0 {
 		retentionDays = customDays
@@ -264,7 +265,7 @@ func cleanupScheduledData() {
 	if err := tasks.ClearTaskResultsByTimeBefore(before); err != nil {
 		logger.Errorf("server", "Failed to clean expired task results: %v", err)
 	}
-	_ = tasks.CleanCronTaskHistory(50)
+	_ = tasks.CleanCronTaskHistory(2)
 
 	// 3. 清理审计日志与过期会话
 	auditlog.RemoveOldLogs()

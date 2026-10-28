@@ -383,24 +383,95 @@ func GetCronTaskLogs(c *gin.Context) {
 		}
 	}
 
+	requestedBatch := strings.TrimSpace(c.Query("batch_id"))
+
 	// 1. 先从轻量 tasks 表中精确锁定该定时任务最近执行的若干个批次 TaskId
-	var batchTaskIDs []string
+	var batchTasks []models.Task
 	_ = db.Model(&models.Task{}).
 		Where("task_id LIKE ? OR task_id LIKE ? OR task_id LIKE ? OR task_id LIKE ? OR task_id = ? OR task_id = ?",
 			prefix1, prefix2, prefix3, prefix4, task.Id, bareID).
 		Order("rowid desc").
 		Limit(10).
-		Pluck("task_id", &batchTaskIDs).Error
+		Find(&batchTasks).Error
 
-	// 2. 使用 task_id IN (?) 命中单字段索引精确获取节点执行结果，彻底避免海量数据下的全表扫描
+	var batchTaskIDs []string
+	for _, bt := range batchTasks {
+		batchTaskIDs = append(batchTaskIDs, bt.TaskId)
+	}
+
+	// 统计每个批次的执行时间与节点数
+	type BatchMeta struct {
+		TaskId    string `json:"task_id"`
+		Command   string `json:"command"`
+		CreatedAt string `json:"created_at"`
+		NodeCount int    `json:"node_count"`
+	}
+	var batchList []BatchMeta
+
 	if len(batchTaskIDs) > 0 {
+		type BatchStat struct {
+			TaskId    string    `gorm:"column:task_id"`
+			CreatedAt time.Time `gorm:"column:created_at"`
+			Count     int       `gorm:"column:cnt"`
+		}
+		var stats []BatchStat
+		_ = db.Model(&models.TaskResult{}).
+			Select("task_id, MIN(created_at) as created_at, COUNT(*) as cnt").
+			Where("task_id IN (?)", batchTaskIDs).
+			Group("task_id").
+			Find(&stats).Error
+
+		statMap := make(map[string]BatchStat)
+		for _, s := range stats {
+			statMap[s.TaskId] = s
+		}
+
+		for _, bt := range batchTasks {
+			st := statMap[bt.TaskId]
+			createdStr := ""
+			if !st.CreatedAt.IsZero() {
+				createdStr = st.CreatedAt.UTC().Format(time.RFC3339)
+			}
+			cnt := st.Count
+			if cnt == 0 {
+				cnt = len(bt.Clients)
+			}
+			batchList = append(batchList, BatchMeta{
+				TaskId:    bt.TaskId,
+				Command:   bt.Command,
+				CreatedAt: createdStr,
+				NodeCount: cnt,
+			})
+		}
+	}
+
+	// 确定当前要查询的目标批次 ID 列表
+	var targetBatchIDs []string
+	currentBatchID := ""
+
+	if requestedBatch == "all" {
+		targetBatchIDs = batchTaskIDs
+		currentBatchID = "all"
+	} else if requestedBatch != "" && requestedBatch != "latest" {
+		targetBatchIDs = []string{requestedBatch}
+		currentBatchID = requestedBatch
+	} else {
+		// 默认精准筛选最新单次执行批次，杜绝多次历史批次在同一弹窗中平铺混淆
+		if len(batchTaskIDs) > 0 {
+			targetBatchIDs = []string{batchTaskIDs[0]}
+			currentBatchID = batchTaskIDs[0]
+		}
+	}
+
+	// 2. 使用 targetBatchIDs IN (?) 命中单字段索引精确获取节点执行结果，彻底避免海量数据下的全表扫描
+	if len(targetBatchIDs) > 0 {
 		_ = db.Select("task_id", "client", "result", "exit_code", "finished_at", "created_at").
 			Preload("ClientInfo").
-			Where("task_id IN (?)", batchTaskIDs).
+			Where("task_id IN (?)", targetBatchIDs).
 			Order("created_at desc").
 			Limit(limit).
 			Find(&results).Error
-	} else {
+	} else if len(batchTaskIDs) == 0 {
 		_ = db.Select("task_id", "client", "result", "exit_code", "finished_at", "created_at").
 			Preload("ClientInfo").
 			Where("task_id LIKE ? OR task_id LIKE ? OR task_id LIKE ? OR task_id LIKE ? OR task_id = ? OR task_id = ?",
@@ -487,10 +558,13 @@ func GetCronTaskLogs(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"status":  "success",
-		"message": "",
-		"logs":    logs,
-		"data":    logs,
+		"status":        "success",
+		"message":       "",
+		"logs":          logs,
+		"data":          logs,
+		"batches":       batchList,
+		"current_batch": currentBatchID,
+		"total":         len(logs),
 	})
 }
 

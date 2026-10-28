@@ -95,10 +95,10 @@ func ClearTaskResultsByTimeBefore(before time.Time) error {
 	return nil
 }
 
-// CleanCronTaskHistory 保留每个定时任务最近 maxBatches 个执行批次，清理更早的历史结果，防止高频定时任务打爆数据库
+// CleanCronTaskHistory 保留每个定时任务最近 maxBatches 个执行批次（默认 2 次），清理更早的历史结果，防止高频定时任务打爆数据库
 func CleanCronTaskHistory(maxBatches int) error {
 	if maxBatches <= 0 {
-		maxBatches = 50
+		maxBatches = 2
 	}
 	db := dbcore.GetDBInstance()
 
@@ -108,21 +108,38 @@ func CleanCronTaskHistory(maxBatches int) error {
 	}
 
 	for _, ct := range cronTasks {
-		bareID := strings.TrimPrefix(strings.TrimPrefix(ct.Id, "cron-"), "task-")
-		prefix1 := fmt.Sprintf("cron-%s-%%", bareID)
-		prefix2 := fmt.Sprintf("cron-%s-%%", ct.Id)
+		_ = CleanSingleCronTaskHistory(ct.Id, maxBatches)
+	}
+	// 顺便清理没有对应 task_results 的旧 task 记录，避免孤儿记录长期堆积
+	_ = db.Where("task_id NOT IN (SELECT DISTINCT task_id FROM task_results)").Delete(&models.Task{}).Error
+	return nil
+}
 
-		var oldTaskIDs []string
-		_ = db.Model(&models.Task{}).
-			Where("task_id LIKE ? OR task_id LIKE ?", prefix1, prefix2).
-			Order("rowid desc").
-			Offset(maxBatches).
-			Pluck("task_id", &oldTaskIDs).Error
+// CleanSingleCronTaskHistory 保留指定定时任务最近 maxBatches 个执行批次（默认 2 次），清理更早的历史结果
+func CleanSingleCronTaskHistory(cronTaskId string, maxBatches int) error {
+	if maxBatches <= 0 {
+		maxBatches = 2
+	}
+	db := dbcore.GetDBInstance()
 
-		if len(oldTaskIDs) > 0 {
-			_ = db.Where("task_id IN (?)", oldTaskIDs).Delete(&models.TaskResult{}).Error
-			_ = db.Where("task_id IN (?)", oldTaskIDs).Delete(&models.Task{}).Error
-		}
+	bareID := strings.TrimPrefix(strings.TrimPrefix(cronTaskId, "cron-"), "task-")
+	prefix1 := fmt.Sprintf("cron-%s-%%", bareID)
+	prefix2 := fmt.Sprintf("cron-%s-%%", cronTaskId)
+	prefix3 := fmt.Sprintf("cron-cron-%s-%%", bareID)
+	prefix4 := fmt.Sprintf("task-%s-%%", bareID)
+
+	var oldTaskIDs []string
+	_ = db.Model(&models.Task{}).
+		Where("task_id LIKE ? OR task_id LIKE ? OR task_id LIKE ? OR task_id LIKE ? OR task_id = ? OR task_id = ?",
+			prefix1, prefix2, prefix3, prefix4, cronTaskId, bareID).
+		Order("rowid desc").
+		Offset(maxBatches).
+		Limit(1000).
+		Pluck("task_id", &oldTaskIDs).Error
+
+	if len(oldTaskIDs) > 0 {
+		_ = db.Where("task_id IN (?)", oldTaskIDs).Delete(&models.TaskResult{}).Error
+		_ = db.Where("task_id IN (?)", oldTaskIDs).Delete(&models.Task{}).Error
 	}
 	return nil
 }

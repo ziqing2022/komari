@@ -67,6 +67,13 @@ export interface CronLog {
   target_nodes_count: number;
 }
 
+export interface BatchMeta {
+  task_id: string;
+  command: string;
+  created_at: string;
+  node_count: number;
+}
+
 const CronPage = () => {
   return (
     <NodeDetailsProvider>
@@ -117,6 +124,8 @@ const CronContent = () => {
   const [logsTaskName, setLogsTaskName] = useState("");
   const [logsCurrentTaskId, setLogsCurrentTaskId] = useState<string | null>(null);
   const [loadingLogs, setLoadingLogs] = useState(false);
+  const [availableBatches, setAvailableBatches] = useState<BatchMeta[]>([]);
+  const [selectedBatchId, setSelectedBatchId] = useState<string>("");
 
   const LOCAL_STORAGE_KEY = "komari_cron_tasks";
   const LOCAL_STORAGE_INIT_KEY = "komari_cron_initialized";
@@ -555,14 +564,27 @@ const CronContent = () => {
   };
 
   // Fetch task logs from API
-  const fetchTaskLogs = async (taskId: string, silent = false) => {
+  const fetchTaskLogs = async (taskId: string, silent = false, batchId?: string) => {
     if (!silent) setLoadingLogs(true);
     try {
-      const res = await fetch(`/api/admin/cron/${encodeURIComponent(taskId)}/logs?limit=500`);
+      const activeBatch = batchId !== undefined ? batchId : selectedBatchId;
+      let url = `/api/admin/cron/${encodeURIComponent(taskId)}/logs?limit=500`;
+      if (activeBatch) {
+        url += `&batch_id=${encodeURIComponent(activeBatch)}`;
+      }
+      const res = await fetch(url);
       if (res.ok) {
         const json = await res.json();
         const logs: CronLog[] = Array.isArray(json?.logs) ? json.logs : Array.isArray(json?.data) ? json.data : [];
         setSelectedTaskLogs(logs);
+        if (Array.isArray(json?.batches)) {
+          setAvailableBatches(json.batches);
+        }
+        if (json?.current_batch) {
+          if (!activeBatch || activeBatch === "latest") {
+            setSelectedBatchId(json.current_batch);
+          }
+        }
       }
     } catch (e) {
       console.warn("Failed to fetch logs:", e);
@@ -575,6 +597,8 @@ const CronContent = () => {
   const handleViewLogs = async (task: CronTask) => {
     setLogsTaskName(task.name);
     setLogsCurrentTaskId(task.id);
+    setSelectedBatchId("");
+    setAvailableBatches([]);
     setLogsDialogOpen(true);
     fetchTaskLogs(task.id, false);
   };
@@ -586,11 +610,11 @@ const CronContent = () => {
     const hasRunning = selectedTaskLogs.some((l) => l.status === "running" || (!l.finished_at && !l.end_time));
 
     const timer = setInterval(() => {
-      fetchTaskLogs(logsCurrentTaskId, true);
+      fetchTaskLogs(logsCurrentTaskId, true, selectedBatchId);
     }, hasRunning ? 2500 : 8000);
 
     return () => clearInterval(timer);
-  }, [logsDialogOpen, logsCurrentTaskId, selectedTaskLogs]);
+  }, [logsDialogOpen, logsCurrentTaskId, selectedTaskLogs, selectedBatchId]);
 
 
 
@@ -1113,21 +1137,21 @@ const CronContent = () => {
       {/* LOGS MODAL */}
       <Dialog.Root open={logsDialogOpen} onOpenChange={setLogsDialogOpen}>
         <Dialog.Content className="max-w-3xl max-h-[80vh] flex flex-col">
-          <Flex justify="between" align="center" className="mb-3">
+          <Flex justify="between" align="center" className="mb-2">
             <div>
               <Dialog.Title className="flex items-center gap-2">
                 <Terminal size={18} />
                 <span>执行日志 - {logsTaskName}</span>
               </Dialog.Title>
               <Dialog.Description size="2" color="gray">
-                查看该定时任务最近的执行历史记录与返回结果
+                查看该定时任务最近的执行历史记录与返回结果（最多保留近2次执行批次）
               </Dialog.Description>
             </div>
             <Button
               size="1"
               variant="soft"
               color="gray"
-              onClick={() => logsCurrentTaskId && fetchTaskLogs(logsCurrentTaskId, false)}
+              onClick={() => logsCurrentTaskId && fetchTaskLogs(logsCurrentTaskId, false, selectedBatchId)}
               disabled={loadingLogs}
               className="flex items-center gap-1.5 cursor-pointer"
             >
@@ -1135,6 +1159,65 @@ const CronContent = () => {
               刷新日志
             </Button>
           </Flex>
+
+          {/* 批次选择栏与指令展示 */}
+          <div className="flex flex-col gap-2 p-2.5 rounded-lg bg-accent-a2 border border-border/70 mb-3">
+            <Flex justify="between" align="center" wrap="wrap" gap="2">
+              <Flex align="center" gap="2">
+                <Text size="2" weight="medium" className="text-foreground shrink-0">
+                  执行批次:
+                </Text>
+                {availableBatches.length > 0 ? (
+                  <Select.Root
+                    value={selectedBatchId || availableBatches[0]?.task_id || "latest"}
+                    onValueChange={(val) => {
+                      setSelectedBatchId(val);
+                      if (logsCurrentTaskId) {
+                        fetchTaskLogs(logsCurrentTaskId, false, val);
+                      }
+                    }}
+                  >
+                    <Select.Trigger placeholder="选择批次" size="1" />
+                    <Select.Content>
+                      {availableBatches.map((b, idx) => {
+                        let label = `批次 #${availableBatches.length - idx}`;
+                        if (b.created_at) {
+                          const d = new Date(b.created_at);
+                          label = isNaN(d.getTime()) ? b.created_at : d.toLocaleString();
+                        }
+                        const isLatest = idx === 0;
+                        return (
+                          <Select.Item key={b.task_id} value={b.task_id}>
+                            {label} {isLatest ? "(最新)" : ""} ({b.node_count} 台)
+                          </Select.Item>
+                        );
+                      })}
+                      {availableBatches.length > 1 && (
+                        <Select.Item value="all">全部历史批次 (平铺展示)</Select.Item>
+                      )}
+                    </Select.Content>
+                  </Select.Root>
+                ) : (
+                  <Badge size="1" color="gray" variant="surface">最新批次</Badge>
+                )}
+              </Flex>
+              <Text size="1" color="gray">
+                共 {selectedTaskLogs.length} 台节点记录
+              </Text>
+            </Flex>
+
+            {/* 当前选中批次的执行指令展示 */}
+            {(() => {
+              const currentMeta = availableBatches.find((b) => b.task_id === selectedBatchId) || availableBatches[0];
+              if (!currentMeta?.command) return null;
+              return (
+                <div className="text-xs bg-background/80 px-2.5 py-1.5 rounded border border-border/50 font-mono text-muted-foreground break-all flex items-start gap-2">
+                  <span className="font-semibold text-foreground shrink-0">执行指令:</span>
+                  <span className="select-all text-xs text-foreground/90">{currentMeta.command}</span>
+                </div>
+              );
+            })()}
+          </div>
 
           <div className="flex-1 overflow-y-auto space-y-4 pr-1">
             {loadingLogs ? (

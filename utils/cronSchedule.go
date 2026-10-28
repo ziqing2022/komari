@@ -8,6 +8,7 @@ import (
 
 	"github.com/komari-monitor/komari/database/dbcore"
 	"github.com/komari-monitor/komari/database/models"
+	"github.com/komari-monitor/komari/database/tasks"
 	"github.com/komari-monitor/komari/internal/scheduler"
 	v2 "github.com/komari-monitor/komari/protocol/v2"
 	logger "github.com/komari-monitor/komari/utils/log"
@@ -108,6 +109,11 @@ func ExecuteCronTask(task *models.CronTask) (string, error) {
 		if len(taskResults) > 0 {
 			_ = db.Create(&taskResults).Error
 		}
+
+		// 异步清理该定时任务超过 2 个批次的历史记录，确保数据库体积绝不无限膨胀
+		go func(cid string) {
+			_ = tasks.CleanSingleCronTaskHistory(cid, 2)
+		}(task.Id)
 	}
 
 	// 4. 下发给在线节点与排队节点（统一通过 SafeConn + 超时与重试队列）

@@ -8,7 +8,6 @@ import (
 
 	"github.com/komari-monitor/komari/database/dbcore"
 	"github.com/komari-monitor/komari/database/models"
-	"github.com/komari-monitor/komari/database/tasks"
 	"github.com/komari-monitor/komari/internal/scheduler"
 	v2 "github.com/komari-monitor/komari/protocol/v2"
 	logger "github.com/komari-monitor/komari/utils/log"
@@ -112,7 +111,26 @@ func ExecuteCronTask(task *models.CronTask) (string, error) {
 
 		// 异步清理该定时任务超过 2 个批次的历史记录，确保数据库体积绝不无限膨胀
 		go func(cid string) {
-			_ = tasks.CleanSingleCronTaskHistory(cid, 2)
+			dbInst := dbcore.GetDBInstance()
+			bID := strings.TrimPrefix(strings.TrimPrefix(cid, "cron-"), "task-")
+			p1 := fmt.Sprintf("cron-%s-%%", bID)
+			p2 := fmt.Sprintf("cron-%s-%%", cid)
+			p3 := fmt.Sprintf("cron-cron-%s-%%", bID)
+			p4 := fmt.Sprintf("task-%s-%%", bID)
+
+			var oldIDs []string
+			_ = dbInst.Model(&models.Task{}).
+				Where("task_id LIKE ? OR task_id LIKE ? OR task_id LIKE ? OR task_id LIKE ? OR task_id = ? OR task_id = ?",
+					p1, p2, p3, p4, cid, bID).
+				Order("rowid desc").
+				Offset(2).
+				Limit(1000).
+				Pluck("task_id", &oldIDs).Error
+
+			if len(oldIDs) > 0 {
+				_ = dbInst.Where("task_id IN (?)", oldIDs).Delete(&models.TaskResult{}).Error
+				_ = dbInst.Where("task_id IN (?)", oldIDs).Delete(&models.Task{}).Error
+			}
 		}(task.Id)
 	}
 

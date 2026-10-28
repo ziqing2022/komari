@@ -1169,6 +1169,7 @@ const CronContent = () => {
                 </Text>
                 {availableBatches.length > 0 ? (
                   <Select.Root
+                    size="1"
                     value={selectedBatchId || availableBatches[0]?.task_id || "latest"}
                     onValueChange={(val) => {
                       setSelectedBatchId(val);
@@ -1177,7 +1178,7 @@ const CronContent = () => {
                       }
                     }}
                   >
-                    <Select.Trigger placeholder="选择批次" size="1" />
+                    <Select.Trigger placeholder="选择批次" />
                     <Select.Content>
                       {availableBatches.map((b, idx) => {
                         let label = `批次 #${availableBatches.length - idx}`;

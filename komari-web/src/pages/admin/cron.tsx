@@ -27,6 +27,8 @@ import {
   Terminal,
   Copy,
   Bell,
+  ChevronDown,
+  ChevronUp,
 } from "lucide-react";
 import { toast } from "sonner";
 import { NodeDetailsProvider, useNodeDetails } from "@/contexts/NodeDetailsContext";
@@ -126,6 +128,7 @@ const CronContent = () => {
   const [loadingLogs, setLoadingLogs] = useState(false);
   const [availableBatches, setAvailableBatches] = useState<BatchMeta[]>([]);
   const [selectedBatchId, setSelectedBatchId] = useState<string>("");
+  const [expandCommand, setExpandCommand] = useState(false);
 
   const LOCAL_STORAGE_KEY = "komari_cron_tasks";
   const LOCAL_STORAGE_INIT_KEY = "komari_cron_initialized";
@@ -598,6 +601,7 @@ const CronContent = () => {
     setLogsTaskName(task.name);
     setLogsCurrentTaskId(task.id);
     setSelectedBatchId("");
+    setExpandCommand(false);
     setAvailableBatches([]);
     setLogsDialogOpen(true);
     fetchTaskLogs(task.id, false);
@@ -1136,7 +1140,7 @@ const CronContent = () => {
 
       {/* LOGS MODAL */}
       <Dialog.Root open={logsDialogOpen} onOpenChange={setLogsDialogOpen}>
-        <Dialog.Content className="max-w-3xl max-h-[80vh] flex flex-col">
+        <Dialog.Content className="max-w-4xl w-full h-[85vh] max-h-[85vh] flex flex-col">
           <Flex justify="between" align="center" className="mb-2">
             <div>
               <Dialog.Title className="flex items-center gap-2">
@@ -1207,20 +1211,68 @@ const CronContent = () => {
               </Text>
             </Flex>
 
-            {/* 当前选中批次的执行指令展示 */}
+            {/* 当前选中批次的执行指令展示（支持折叠/展开与复制，防止超长脚本挤占结果展示） */}
             {(() => {
               const currentMeta = availableBatches.find((b) => b.task_id === selectedBatchId) || availableBatches[0];
               if (!currentMeta?.command) return null;
+              const isLong = currentMeta.command.length > 90 || currentMeta.command.includes("\n");
               return (
-                <div className="text-xs bg-background/80 px-2.5 py-1.5 rounded border border-border/50 font-mono text-muted-foreground break-all flex items-start gap-2">
-                  <span className="font-semibold text-foreground shrink-0">执行指令:</span>
-                  <span className="select-all text-xs text-foreground/90">{currentMeta.command}</span>
+                <div className="text-xs bg-background/80 px-2.5 py-1.5 rounded border border-border/50 font-mono text-muted-foreground flex flex-col gap-1 transition-all">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-semibold text-foreground flex items-center gap-1.5 shrink-0">
+                      <Terminal size={13} className="text-muted-foreground" />
+                      执行指令:
+                    </span>
+                    <div className="flex items-center gap-1">
+                      <IconButton
+                        size="1"
+                        variant="ghost"
+                        color="gray"
+                        className="cursor-pointer h-5 w-5"
+                        title={t("common.copy", "复制指令")}
+                        onClick={() => {
+                          navigator.clipboard.writeText(currentMeta.command || "");
+                          toast.success(t("copy_success", "指令已复制到剪贴板"));
+                        }}
+                      >
+                        <Copy size={11} />
+                      </IconButton>
+                      {isLong && (
+                        <Button
+                          size="1"
+                          variant="ghost"
+                          color="gray"
+                          className="cursor-pointer text-[11px] h-5 px-1.5 flex items-center gap-0.5"
+                          onClick={() => setExpandCommand((prev) => !prev)}
+                        >
+                          {expandCommand ? (
+                            <>
+                              <ChevronUp size={12} />
+                              收起指令
+                            </>
+                          ) : (
+                            <>
+                              <ChevronDown size={12} />
+                              展开完整指令
+                            </>
+                          )}
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                  <div
+                    className={`select-all text-xs text-foreground/90 whitespace-pre-wrap break-all ${
+                      expandCommand ? "max-h-48 overflow-y-auto" : "max-h-12 overflow-y-auto"
+                    }`}
+                  >
+                    {currentMeta.command}
+                  </div>
                 </div>
               );
             })()}
           </div>
 
-          <div className="flex-1 overflow-y-auto space-y-4 pr-1">
+          <div className="flex-1 min-h-0 overflow-y-auto space-y-4 pr-1">
             {loadingLogs ? (
               <Loading />
             ) : selectedTaskLogs.length === 0 ? (
@@ -1313,7 +1365,7 @@ const CronContent = () => {
                           </Flex>
                         </Flex>
 
-                        <div className="bg-black/90 text-emerald-400 p-2.5 rounded font-mono text-xs overflow-x-auto whitespace-pre-wrap select-text max-h-48">
+                        <div className="bg-black/90 text-emerald-400 p-3 rounded font-mono text-xs overflow-x-auto whitespace-pre-wrap select-text max-h-72 min-h-[48px] shadow-inner">
                           {log.output || (isRunning ? "[指令已成功下发至目标节点，正在等待输出回传...]" : "[无标准输出]")}
                         </div>
                       </div>

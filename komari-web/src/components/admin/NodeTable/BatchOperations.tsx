@@ -580,6 +580,8 @@ const BatchGroupTagsDialog: React.FC<{
 /* =========================================================================
  * 3. 批量版本升级/切换对话框
  * ========================================================================= */
+const DEFAULT_PRESET_VERSIONS = ["latest", "1.2.13", "1.2.12", "1.2.11"];
+
 const BatchVersionDialog: React.FC<{
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -590,11 +592,42 @@ const BatchVersionDialog: React.FC<{
   const { call } = useRPC2Call();
   const [targetVersion, setTargetVersion] = useState("latest");
   const [submitting, setSubmitting] = useState(false);
+  const [presetVersions, setPresetVersions] = useState<string[]>(DEFAULT_PRESET_VERSIONS);
+  const [loadingVersions, setLoadingVersions] = useState(false);
   const [nodeResults, setNodeResults] = useState<
     Record<string, { status: "pending" | "success" | "error"; message?: string }>
   >({});
 
-  const presetVersions = ["latest", "1.6.0", "1.5.0"];
+  useEffect(() => {
+    if (!open) return;
+    let isMounted = true;
+    const fetchReleases = async () => {
+      try {
+        setLoadingVersions(true);
+        const res = await fetch("https://api.github.com/repos/ziqing2022/komari-agent/releases?per_page=6");
+        if (res.ok) {
+          const releases = await res.json();
+          if (Array.isArray(releases) && releases.length > 0) {
+            const versions = releases
+              .filter((r: any) => !r.draft && !r.prerelease && r.tag_name)
+              .map((r: any) => r.tag_name.replace(/^v/i, ""))
+              .slice(0, 5);
+            if (isMounted && versions.length > 0) {
+              setPresetVersions(["latest", ...versions]);
+            }
+          }
+        }
+      } catch (e) {
+        // Fallback to DEFAULT_PRESET_VERSIONS
+      } finally {
+        if (isMounted) setLoadingVersions(false);
+      }
+    };
+    fetchReleases();
+    return () => {
+      isMounted = false;
+    };
+  }, [open]);
 
   const handleSwitch = async () => {
     if (!targetVersion.trim()) {
@@ -658,7 +691,7 @@ const BatchVersionDialog: React.FC<{
             <label className="text-xs font-semibold text-muted-foreground block mb-1.5">
               {t("admin.batch.selectTargetVersion", "目标版本")}
             </label>
-            <div className="flex gap-2 mb-2">
+            <div className="flex flex-wrap gap-2 mb-2 items-center">
               {presetVersions.map((v) => (
                 <Button
                   key={v}
@@ -669,11 +702,14 @@ const BatchVersionDialog: React.FC<{
                   {v === "latest" ? "latest (最新版)" : v}
                 </Button>
               ))}
+              {loadingVersions && (
+                <RefreshCw size={12} className="animate-spin text-muted-foreground ml-1" />
+              )}
             </div>
             <TextField.Root
               value={targetVersion}
               onChange={(e) => setTargetVersion(e.target.value)}
-              placeholder="latest / 1.6.0"
+              placeholder="latest / 1.2.13"
               disabled={submitting}
             />
           </div>

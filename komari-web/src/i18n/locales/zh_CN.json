@@ -949,8 +949,8 @@
                    "socks5Settings":  "SOCKS5 认证设置 (留空免密)",
                    "modalDescription":  "配置 Sing-box 运行规则，支持端口转发与 VLESS-Reality、SOCKS5、Shadowsocks 等主流协议，自动下发并放行防火墙",
                    "searchPlaceholder":  "搜索规则名称、SNI、端口、目标...",
-                   "udpNoticeTitle":  "协议提示：",
-                   "udpNoticeDesc":  "TUIC 与 Hysteria 2 基于纯 UDP (QUIC) 架构。跨机反代通道为 TCP 隧道，无法直接承载 UDP 流量。若需为无公网的内网小鸡做跨机穿透，推荐使用 VLESS Reality 协议；若使用 TUIC/Hy2，建议选择「本机直连出口」并在公网服务器上运行。"
+                   "udpNoticeTitle":  "UDP 反向穿透已就绪：",
+                   "udpNoticeDesc":  "系统已内置预建立工作通道 (UDPPacket) 多路复用穿透引擎，已原生打通 TUIC、Hysteria 2、WireGuard 与 DNS 的公网跨机反代暴露。请确保中转机与内网节点的客户端均更新至最新版本。"
                },
     "page_not_found":  "真不巧，网页被小鞠吃掉了。",
     "ping":  {

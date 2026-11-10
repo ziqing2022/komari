@@ -1716,7 +1716,7 @@
                    "protocols":  {
                                      "forward":  "ポート転送"
                                  },
-                   "udpNoticeTitle":  "プロトコル通知: ",
-                   "udpNoticeDesc":  "TUICとHysteria 2は純粋なUDP (QUIC) ベースのプロトコルです。リバースブリッジはTCPトンネルであり、UDPを転送できません。NAT環境ではVLESS Realityの使用を推奨します。"
+                   "udpNoticeTitle":  "UDPリバースプロキシ対応: ",
+                   "udpNoticeDesc":  "事前確立された UDPPacket 多重化エンジンが有効です。TUIC、Hysteria 2、WireGuard、DNS のクロスノードリバースプロキシをネイティブサポートしています。"
                }
 }

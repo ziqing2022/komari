@@ -1417,15 +1417,15 @@ const TunnelContent = () => {
                 </button>
               </div>
 
-              {/* TUIC / Hysteria2 UDP Architecture Alert */}
+              {/* TUIC / Hysteria2 UDP Architecture Notice */}
               {(formRuleType === "tuic" || formRuleType === "hysteria2") && formIsReverse && (
-                <div className="p-2.5 rounded-md bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 text-xs text-amber-800 dark:text-amber-200 flex items-start gap-2">
-                  <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-amber-600" />
+                <div className="p-2.5 rounded-md bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-800 text-xs text-blue-800 dark:text-blue-200 flex items-start gap-2">
+                  <Sparkles className="w-4 h-4 shrink-0 mt-0.5 text-blue-600 dark:text-blue-400" />
                   <div>
-                    <strong>{t("tunnel.udpNoticeTitle", "协议提示：")}</strong>
+                    <strong>{t("tunnel.udpNoticeTitle", "UDP 反向穿透已就绪：")}</strong>
                     {t(
                       "tunnel.udpNoticeDesc",
-                      "TUIC 与 Hysteria 2 基于纯 UDP (QUIC) 架构。跨机反代通道为 TCP 隧道，无法直接承载 UDP 流量。若需为无公网的内网小鸡做跨机穿透，推荐使用 VLESS Reality 协议；若使用 TUIC/Hy2，建议选择「本机直连出口」并在公网服务器上运行。"
+                      "系统已内置预建立工作通道 (UDPPacket) 多路复用穿透引擎，已原生打通 TUIC 与 Hysteria 2 的公网跨机反代暴露。请确保中转机与内网节点的客户端均更新至最新版本。"
                     )}
                   </div>
                 </div>

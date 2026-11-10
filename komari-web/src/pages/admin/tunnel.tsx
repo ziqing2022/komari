@@ -11,6 +11,7 @@ import {
   IconButton,
   Switch,
   Select,
+  Popover,
 } from "@radix-ui/themes";
 import {
   Network,
@@ -30,6 +31,9 @@ import {
   Zap,
   KeyRound,
   Lock,
+  Check,
+  ChevronsUpDown,
+  X,
 } from "lucide-react";
 import { toast } from "sonner";
 import { NodeDetailsProvider, useNodeDetails, type NodeDetail } from "@/contexts/NodeDetailsContext";
@@ -78,6 +82,180 @@ export interface TunnelRule {
 
 const LOCAL_STORAGE_KEY = "komari_tunnel_rules";
 const LOCAL_STORAGE_INIT_KEY = "komari_tunnel_initialized";
+
+interface ServerComboboxProps {
+  nodes: NodeDetail[] | null;
+  value: string;
+  onChange: (value: string) => void;
+  disabled?: boolean;
+  placeholder?: string;
+  allowCustom?: boolean;
+  customLabel?: string;
+  filterOutUUID?: string;
+}
+
+const ServerCombobox = ({
+  nodes,
+  value,
+  onChange,
+  disabled = false,
+  placeholder = "选择服务器节点",
+  allowCustom = false,
+  customLabel = "自定义公网机器",
+  filterOutUUID,
+}: ServerComboboxProps) => {
+  const { t } = useTranslation();
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+
+  const availableNodes = useMemo(() => {
+    if (!nodes) return [];
+    if (!filterOutUUID) return nodes;
+    return nodes.filter((n) => n?.uuid && n.uuid !== filterOutUUID);
+  }, [nodes, filterOutUUID]);
+
+  const filteredNodes = useMemo(() => {
+    if (!query.trim()) return availableNodes;
+    const q = query.trim().toLowerCase();
+    return availableNodes.filter((n) => {
+      const name = (n.name || "").toLowerCase();
+      const ipv4 = (n.ipv4 || "").toLowerCase();
+      const ipv6 = (n.ipv6 || "").toLowerCase();
+      const uuid = (n.uuid || "").toLowerCase();
+      return name.includes(q) || ipv4.includes(q) || ipv6.includes(q) || uuid.includes(q);
+    });
+  }, [availableNodes, query]);
+
+  const selectedNode = useMemo(() => {
+    if (!value || value === "custom") return null;
+    return availableNodes.find((n) => n.uuid === value) || null;
+  }, [availableNodes, value]);
+
+  const displayLabel = useMemo(() => {
+    if (value === "custom") {
+      return customLabel;
+    }
+    if (selectedNode) {
+      return `${selectedNode.name || selectedNode.uuid} (${selectedNode.ipv4 || "无IPv4"})`;
+    }
+    return placeholder;
+  }, [value, selectedNode, customLabel, placeholder]);
+
+  return (
+    <Popover.Root open={open} onOpenChange={setOpen}>
+      <Popover.Trigger>
+        <button
+          type="button"
+          disabled={disabled}
+          className={`w-full flex items-center justify-between px-3 py-2 text-sm rounded-md border transition-all text-left ${
+            disabled
+              ? "opacity-50 cursor-not-allowed bg-gray-100 dark:bg-gray-800 border-gray-200 dark:border-gray-700 text-gray-500"
+              : "cursor-pointer bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-800 hover:border-gray-300 dark:hover:border-gray-700 text-gray-900 dark:text-gray-100 shadow-xs focus:outline-hidden focus:ring-2 focus:ring-blue-500/30"
+          }`}
+        >
+          <span className="flex items-center gap-2 truncate">
+            {value === "custom" ? (
+              <Globe className="w-4 h-4 text-purple-500 shrink-0" />
+            ) : (
+              <Server className="w-4 h-4 text-gray-400 shrink-0" />
+            )}
+            <span className={`truncate ${!value ? "text-gray-400" : "font-medium"}`}>
+              {displayLabel}
+            </span>
+          </span>
+          <ChevronsUpDown className="w-4 h-4 text-gray-400 shrink-0 ml-2" />
+        </button>
+      </Popover.Trigger>
+
+      <Popover.Content
+        align="start"
+        sideOffset={4}
+        className="p-2 w-[var(--radix-popover-trigger-width)] min-w-[320px] max-w-md shadow-xl rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 z-50"
+      >
+        <div className="mb-2">
+          <TextField.Root
+            size="2"
+            placeholder={t("tunnel.searchServerPlaceholder", "搜索服务器名称或 IP...")}
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            autoFocus
+          >
+            <TextField.Slot>
+              <Search className="w-4 h-4 text-gray-400" />
+            </TextField.Slot>
+            {query && (
+              <TextField.Slot>
+                <button
+                  type="button"
+                  onClick={() => setQuery("")}
+                  className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 cursor-pointer"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </TextField.Slot>
+            )}
+          </TextField.Root>
+        </div>
+
+        <div className="max-h-56 overflow-y-auto space-y-0.5 pr-0.5">
+          {allowCustom && (
+            <div
+              onClick={() => {
+                onChange("custom");
+                setOpen(false);
+                setQuery("");
+              }}
+              className={`flex items-center justify-between px-2.5 py-1.5 rounded-md text-xs cursor-pointer transition-colors ${
+                value === "custom"
+                  ? "bg-purple-50 text-purple-700 dark:bg-purple-950/50 dark:text-purple-300 font-semibold"
+                  : "hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-700 dark:text-gray-300"
+              }`}
+            >
+              <div className="flex items-center gap-2 truncate">
+                <Globe className="w-4 h-4 text-purple-500 shrink-0" />
+                <span className="truncate">{customLabel}</span>
+              </div>
+              {value === "custom" && <Check className="w-4 h-4 text-purple-600 shrink-0" />}
+            </div>
+          )}
+
+          {filteredNodes.length === 0 ? (
+            <div className="py-4 text-center text-xs text-gray-400">
+              {t("tunnel.noServerFound", "未找到匹配的服务器")}
+            </div>
+          ) : (
+            filteredNodes.map((node) => {
+              const isSelected = value === node.uuid;
+              return (
+                <div
+                  key={node.uuid}
+                  onClick={() => {
+                    onChange(node.uuid);
+                    setOpen(false);
+                    setQuery("");
+                  }}
+                  className={`flex items-center justify-between px-2.5 py-1.5 rounded-md text-xs cursor-pointer transition-colors ${
+                    isSelected
+                      ? "bg-blue-50 text-blue-700 dark:bg-blue-950/50 dark:text-blue-300 font-semibold"
+                      : "hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-700 dark:text-gray-300"
+                  }`}
+                >
+                  <div className="flex flex-col truncate mr-2">
+                    <span className="truncate font-medium">{node.name || node.uuid}</span>
+                    <span className="text-[11px] text-gray-400 truncate">
+                      {node.ipv4 || node.ipv6 || "无IP"}
+                    </span>
+                  </div>
+                  {isSelected && <Check className="w-4 h-4 text-blue-600 shrink-0" />}
+                </div>
+              );
+            })
+          )}
+        </div>
+      </Popover.Content>
+    </Popover.Root>
+  );
+};
 
 const TunnelPage = () => {
   return (
@@ -134,9 +312,7 @@ const TunnelContent = () => {
   const [formTunnelSecret, setFormTunnelSecret] = useState("");
   const [formObfsPassword, setFormObfsPassword] = useState("");
 
-  // 搜索过滤与 SNI 测活状态
-  const [serverSearchQuery, setServerSearchQuery] = useState("");
-  const [bridgeSearchQuery, setBridgeSearchQuery] = useState("");
+  // SNI 测活状态
   const [sniProbing, setSniProbing] = useState(false);
   const [sniProbeResult, setSniProbeResult] = useState<{
     status?: string;
@@ -1127,56 +1303,22 @@ const TunnelContent = () => {
           <div className="space-y-4 max-h-[75vh] overflow-y-auto pr-1">
             {/* Server Node Selection */}
             <div>
-              <div className="flex items-center justify-between mb-1">
-                <Text as="label" size="2" weight="bold">
-                  {t("tunnel.server", "所属节点")} *
-                </Text>
-                {nodeDetail && nodeDetail.length > 3 && (
-                  <span className="text-[11px] text-gray-400">支持输入名称或 IP 实时过滤</span>
-                )}
-              </div>
-              <div className="space-y-1.5">
-                {!editingRule && nodeDetail && nodeDetail.length > 3 && (
-                  <TextField.Root
-                    size="1"
-                    placeholder="🔍 搜索服务器名称或 IP..."
-                    value={serverSearchQuery}
-                    onChange={(e) => setServerSearchQuery(e.target.value)}
-                  />
-                )}
-                <Select.Root
-                  value={formClientUUID}
-                  onValueChange={setFormClientUUID}
-                  disabled={Boolean(editingRule)}
-                >
-                  <Select.Trigger className="w-full" placeholder={t("tunnel.selectServer", "选择服务器节点")} />
-                  <Select.Content>
-                    {nodeDetail &&
-                      nodeDetail
-                        .filter((node) => {
-                          if (!serverSearchQuery.trim()) return true;
-                          const q = serverSearchQuery.trim().toLowerCase();
-                          return (
-                            (node.name || "").toLowerCase().includes(q) ||
-                            (node.ipv4 || "").toLowerCase().includes(q) ||
-                            (node.ipv6 || "").toLowerCase().includes(q) ||
-                            (node.uuid || "").toLowerCase().includes(q)
-                          );
-                        })
-                        .map((node) => (
-                          <Select.Item key={node.uuid} value={node.uuid}>
-                            {node.name || node.uuid} ({node.ipv4 || "无IPv4"})
-                          </Select.Item>
-                        ))}
-                  </Select.Content>
-                </Select.Root>
-              </div>
+              <Text as="label" size="2" weight="bold" className="block mb-1">
+                {t("tunnel.server", "所属节点")} *
+              </Text>
+              <ServerCombobox
+                nodes={nodeDetail}
+                value={formClientUUID}
+                onChange={setFormClientUUID}
+                disabled={Boolean(editingRule)}
+                placeholder={t("tunnel.selectServer", "选择服务器节点")}
+              />
             </div>
 
             {/* Protocol Type Selector */}
             <div>
               <Text as="label" size="2" weight="bold" className="block mb-1">
-                功能与协议类型 *
+                {t("tunnel.protocolType", "功能与协议类型")} *
               </Text>
               <div className="grid grid-cols-4 gap-2">
                 {[
@@ -1216,11 +1358,11 @@ const TunnelContent = () => {
               </div>
             </div>
 
-            {/* 网络出口类型单选 (表单合并关键) */}
+            {/* 网络出口类型 */}
             <div className="space-y-2 border border-blue-200/60 dark:border-blue-900/40 p-3 rounded-lg bg-blue-50/20 dark:bg-blue-950/10">
               <div className="flex items-center justify-between">
                 <Text as="label" size="2" weight="bold" className="text-blue-950 dark:text-blue-200">
-                  网络出口类型（单选） *
+                  {t("tunnel.networkExitType", "网络出口类型")} *
                 </Text>
                 <span className="text-[11px] text-gray-500">统一内网与公网规则</span>
               </div>
@@ -1235,10 +1377,10 @@ const TunnelContent = () => {
                   }`}
                 >
                   <div className="font-semibold text-xs text-blue-600 dark:text-blue-400">
-                    ● 本机直连出口
+                    ● {t("tunnel.networkExitDirect", "本机直连出口")}
                   </div>
                   <div className="text-[11px] text-gray-500 mt-0.5">
-                    机器有公网 IP，直接对外监听
+                    {t("tunnel.networkExitDirectDesc", "服务器拥有公网 IP，直接对外监听")}
                   </div>
                 </button>
 
@@ -1252,10 +1394,10 @@ const TunnelContent = () => {
                   }`}
                 >
                   <div className="font-semibold text-xs text-purple-600 dark:text-purple-400">
-                    ● 跨机反向穿透中转
+                    ● {t("tunnel.networkExitReverse", "跨机反向穿透中转")}
                   </div>
                   <div className="text-[11px] text-gray-500 mt-0.5">
-                    无公网内网/NAT小鸡，流量拉到中转机
+                    {t("tunnel.networkExitReverseDesc", "无公网内网/NAT机器，流量拉到中转机")}
                   </div>
                 </button>
               </div>
@@ -1264,23 +1406,14 @@ const TunnelContent = () => {
               {formIsReverse && (
                 <div className="mt-2.5 pt-2.5 border-t border-blue-100 dark:border-blue-900/30 space-y-3">
                   <div>
-                    <div className="flex items-center justify-between mb-1">
-                      <span className="text-xs font-semibold text-purple-900 dark:text-purple-300">
-                        中转公网服务器 (Bridge Node) *
-                      </span>
-                    </div>
-                    {nodeDetail && nodeDetail.length > 3 && (
-                      <TextField.Root
-                        size="1"
-                        placeholder="🔍 搜索中转机名称或 IP..."
-                        value={bridgeSearchQuery}
-                        onChange={(e) => setBridgeSearchQuery(e.target.value)}
-                        className="mb-1"
-                      />
-                    )}
-                    <Select.Root
+                    <span className="text-xs font-semibold text-purple-900 dark:text-purple-300 block mb-1">
+                      {t("tunnel.bridgeServer", "中转服务器")} *
+                    </span>
+                    <ServerCombobox
+                      nodes={nodeDetail}
                       value={formBridgeClientUUID}
-                      onValueChange={(val) => {
+                      filterOutUUID={formClientUUID}
+                      onChange={(val) => {
                         setFormBridgeClientUUID(val);
                         if (val !== "custom") {
                           const node = serverMap.get(val);
@@ -1291,42 +1424,16 @@ const TunnelContent = () => {
                           setFormBridgeHost("");
                         }
                       }}
-                    >
-                      <Select.Trigger className="w-full" placeholder="请选择公网中转机或自定义" />
-                      <Select.Content>
-                        <Select.Group>
-                          <Select.Label>纳管节点</Select.Label>
-                          {nodeDetail &&
-                            nodeDetail
-                              .filter((n) => n?.uuid && n.uuid !== formClientUUID)
-                              .filter((n) => {
-                                if (!bridgeSearchQuery.trim()) return true;
-                                const q = bridgeSearchQuery.trim().toLowerCase();
-                                return (
-                                  (n.name || "").toLowerCase().includes(q) ||
-                                  (n.ipv4 || "").toLowerCase().includes(q)
-                                );
-                              })
-                              .map((n) => (
-                                <Select.Item key={n.uuid} value={n.uuid}>
-                                  {n.name} {n.ipv4 ? `(${n.ipv4})` : ""}
-                                </Select.Item>
-                              ))}
-                        </Select.Group>
-                        <Select.Separator />
-                        <Select.Group>
-                          <Select.Item value="custom">
-                            🌐 自定义公网机器 (手动输入公网 IP 或域名)
-                          </Select.Item>
-                        </Select.Group>
-                      </Select.Content>
-                    </Select.Root>
+                      placeholder={t("tunnel.bridgeServerPlaceholder", "请选择公网中转机或自定义")}
+                      allowCustom
+                      customLabel={t("tunnel.customBridgeServer", "自定义公网机器")}
+                    />
                   </div>
 
                   <div className="grid grid-cols-2 gap-2">
                     <div>
                       <span className="text-xs font-semibold text-gray-700 dark:text-gray-300 block mb-1">
-                        中转机公网 IP / 域名 *
+                        {t("tunnel.bridgeHost", "中转机公网地址")} *
                       </span>
                       <TextField.Root
                         placeholder="例如: 158.179.168.46"
@@ -1336,7 +1443,7 @@ const TunnelContent = () => {
                     </div>
                     <div>
                       <span className="text-xs font-semibold text-gray-700 dark:text-gray-300 block mb-1">
-                        中转公网暴露端口 *
+                        {t("tunnel.bridgePort", "中转出口端口")} *
                       </span>
                       <TextField.Root
                         type="number"
@@ -1412,7 +1519,7 @@ const TunnelContent = () => {
                     disabled={generatingKeys}
                   >
                     <Sparkles className={`w-3.5 h-3.5 mr-1 ${generatingKeys ? "animate-spin" : ""}`} />
-                    🎲 一键生成凭据密钥
+                    🎲 {t("tunnel.generateCredentials", "一键生成凭据密钥")}
                   </Button>
                 </Flex>
               )}
@@ -1460,7 +1567,7 @@ const TunnelContent = () => {
                         }`}
                       >
                         <Server className="w-4 h-4" />
-                        <span>本机 (127.0.0.1)</span>
+                        <span>{t("tunnel.targetTypes.local", "本机")}</span>
                       </button>
 
                       <button
@@ -1478,7 +1585,7 @@ const TunnelContent = () => {
                         }`}
                       >
                         <Globe className="w-4 h-4" />
-                        <span>自定义目标 (IP / 域名)</span>
+                        <span>{t("tunnel.targetTypes.custom", "自定义目标")}</span>
                       </button>
                     </div>
 
@@ -1488,7 +1595,7 @@ const TunnelContent = () => {
                           {t("tunnel.targetHost", "目标主机")} *
                         </Text>
                         <TextField.Root
-                          placeholder={t("tunnel.targetHostPlaceholder", "例如：192.168.1.100 或 example.internal")}
+                          placeholder={t("tunnel.targetHostPlaceholder", "例如：192.168.1.100 或 internal.domain")}
                           value={formTargetHost}
                           onChange={(e) => setFormTargetHost(e.target.value)}
                         />
@@ -1520,7 +1627,7 @@ const TunnelContent = () => {
               <div className="space-y-2 border border-indigo-100 dark:border-indigo-900/40 p-3 rounded-lg bg-indigo-50/20 dark:bg-indigo-950/20">
                 <div className="flex items-center justify-between">
                   <Text as="label" size="2" weight="bold" className="text-indigo-950 dark:text-indigo-200">
-                    伪装域名 (SNI / ServerName) *
+                    {t("tunnel.sni", "伪装域名")} *
                   </Text>
                   <Button
                     size="1"
@@ -1530,7 +1637,7 @@ const TunnelContent = () => {
                     loading={sniProbing}
                     onClick={() => handleProbeSNI(formSNI)}
                   >
-                    ⚡ 一键测活 TLS 1.3
+                    ⚡ {t("tunnel.sniProbe", "一键测活")}
                   </Button>
                 </div>
 
@@ -1555,7 +1662,7 @@ const TunnelContent = () => {
                       }
                     }}
                   >
-                    <Select.Trigger placeholder="优质冷门 SNI 库" />
+                    <Select.Trigger placeholder={t("tunnel.sniCandidates", "优质冷门 SNI 库")} />
                     <Select.Content>
                       {CURATED_SNIS.map((s) => (
                         <Select.Item key={s.domain} value={s.domain}>
@@ -1587,7 +1694,7 @@ const TunnelContent = () => {
               <div className="space-y-3 border border-purple-100 dark:border-purple-900/40 p-3.5 rounded-lg bg-purple-50/30 dark:bg-purple-950/20">
                 <Flex justify="between" align="center">
                   <Text size="2" weight="bold" color="purple">
-                    VLESS + REALITY 核心参数
+                    {t("tunnel.realitySettings", "REALITY 核心参数")}
                   </Text>
                   <Badge color="purple" variant="soft">XTLS-Vision</Badge>
                 </Flex>
@@ -1606,7 +1713,7 @@ const TunnelContent = () => {
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <Text as="label" size="2" weight="medium" className="block mb-1">
-                      REALITY 私钥 (Private Key) *
+                      {t("tunnel.privateKey", "REALITY 私钥")} *
                     </Text>
                     <TextField.Root
                       placeholder="x25519 私钥"
@@ -1617,7 +1724,7 @@ const TunnelContent = () => {
 
                   <div>
                     <Text as="label" size="2" weight="medium" className="block mb-1">
-                      REALITY 公钥 (Public Key)
+                      {t("tunnel.publicKey", "REALITY 公钥")}
                     </Text>
                     <TextField.Root
                       placeholder="x25519 公钥 (用于分享)"
@@ -1629,7 +1736,7 @@ const TunnelContent = () => {
 
                 <div>
                   <Text as="label" size="2" weight="medium" className="block mb-1">
-                    Short ID (简短 ID)
+                    Short ID
                   </Text>
                   <TextField.Root
                     placeholder="例如：6ba85170"
@@ -1640,7 +1747,7 @@ const TunnelContent = () => {
 
                 <div>
                   <Text as="label" size="2" weight="medium" className="block mb-1">
-                    TLS 伪装指纹 (Fingerprint)
+                    TLS 伪装指纹
                   </Text>
                   <Select.Root value={formFingerprint} onValueChange={(val) => setFormFingerprint(val)}>
                     <Select.Trigger className="w-full" />
@@ -1662,7 +1769,7 @@ const TunnelContent = () => {
               <div className="space-y-3 border border-teal-100 dark:border-teal-900/40 p-3.5 rounded-lg bg-teal-50/20 dark:bg-teal-950/20">
                 <Flex justify="between" align="center">
                   <Text size="2" weight="bold" color="teal">
-                    TUIC v5 核心参数 (基于 QUIC / UDP)
+                    TUIC v5 核心参数
                   </Text>
                   <Badge color="teal" variant="soft">0-RTT · BBR</Badge>
                 </Flex>
@@ -1680,7 +1787,7 @@ const TunnelContent = () => {
 
                 <div>
                   <Text as="label" size="2" weight="medium" className="block mb-1">
-                    访问密码 (Password) *
+                    访问密码 *
                   </Text>
                   <TextField.Root
                     placeholder="连接认证密码"
@@ -1700,14 +1807,14 @@ const TunnelContent = () => {
               <div className="space-y-3 border border-pink-100 dark:border-pink-900/40 p-3.5 rounded-lg bg-pink-50/20 dark:bg-pink-950/20">
                 <Flex justify="between" align="center">
                   <Text size="2" weight="bold" color="pink">
-                    Hysteria 2 核心参数
+                    {t("tunnel.obfsSettings", "Hysteria 2 混淆配置")}
                   </Text>
                   <Badge color="pink" variant="soft">UDP 加速</Badge>
                 </Flex>
 
                 <div>
                   <Text as="label" size="2" weight="medium" className="block mb-1">
-                    访问密码 (Password) *
+                    访问密码 *
                   </Text>
                   <TextField.Root
                     placeholder="设置连接密码"
@@ -1719,7 +1826,7 @@ const TunnelContent = () => {
                 <div>
                   <div className="flex items-center justify-between mb-1">
                     <Text as="label" size="2" weight="medium">
-                      Salamander 混淆密码 (抗运营商 UDP QoS 限速)
+                      Salamander 混淆密码
                     </Text>
                     <Button
                       size="1"
@@ -1765,7 +1872,7 @@ const TunnelContent = () => {
             {formRuleType === "socks5" && (
               <div className="space-y-3 border border-gray-100 dark:border-gray-800 p-3 rounded-lg bg-gray-50/50 dark:bg-gray-800/30">
                 <Text size="2" weight="bold">
-                  SOCKS5 认证设置 (留空则免密)
+                  SOCKS5 认证设置 (留空免密)
                 </Text>
                 <div className="grid grid-cols-2 gap-3">
                   <div>
@@ -1800,7 +1907,7 @@ const TunnelContent = () => {
                 </Text>
                 <div>
                   <Text as="label" size="2" weight="medium" className="block mb-1">
-                    加密方法 (Method)
+                    加密方法
                   </Text>
                   <Select.Root
                     value={formMethod}
@@ -1819,7 +1926,7 @@ const TunnelContent = () => {
                 </div>
                 <div>
                   <Text as="label" size="2" weight="medium" className="block mb-1">
-                    密码 (Password) *
+                    密码 *
                   </Text>
                   <TextField.Root
                     placeholder="输入或生成密码"
@@ -1848,7 +1955,7 @@ const TunnelContent = () => {
                 </div>
                 <div>
                   <Text as="label" size="2" weight="medium" className="block mb-1">
-                    伪装域名 (SNI)
+                    {t("tunnel.sni", "伪装域名")}
                   </Text>
                   <TextField.Root
                     placeholder="例如：gateway.icloud.com"

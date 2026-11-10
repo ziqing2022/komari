@@ -165,10 +165,10 @@ export default function SiteSettings() {
         }}
       />
       <SettingCardLabel>
-        {t("settings.site.agent_failover_section", "Agent 通信与多域名容灾漂移 (Failover & Zero-Touch Migration)")}
+        {t("settings.site.agent_failover_section", "Agent 通信与多域名容灾漂移")}
       </SettingCardLabel>
       <SettingCardShortTextInput
-        title={t("settings.site.agent_primary_endpoint", "Agent 主连接地址 (Primary Endpoint)")}
+        title={t("settings.site.agent_primary_endpoint", "Agent 主连接地址")}
         description={t(
           "settings.site.agent_primary_endpoint_desc",
           "Agent 首选通信地址。留空则默认回退使用脚本域名或当前面板 Origin。保存后自动热推下发至所有在线客户端。"
@@ -180,7 +180,7 @@ export default function SiteSettings() {
         }}
       />
       <SettingCardLongTextInput
-        title={t("settings.site.agent_backup_endpoints", "Agent 备用逃生地址池 (Backup Endpoints)")}
+        title={t("settings.site.agent_backup_endpoints", "Agent 备用逃生地址池")}
         description={t(
           "settings.site.agent_backup_endpoints_desc",
           "支持配置多个备用域名或直连 IP:Port（如 http://168.107.21.149:25774），每行一个或逗号分隔。当主域名被封或失效时，Agent 自动漂移至可用备用地址并粘性持久化。换机时在此填入新服务器地址即可实现存量小鸡零接触平滑迁移。"

@@ -34,7 +34,6 @@ import {
   Check,
   ChevronsUpDown,
   X,
-  AlertTriangle,
 } from "lucide-react";
 import { toast } from "sonner";
 import { NodeDetailsProvider, useNodeDetails, type NodeDetail } from "@/contexts/NodeDetailsContext";

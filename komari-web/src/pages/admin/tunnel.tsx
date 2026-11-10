@@ -528,8 +528,6 @@ const TunnelContent = () => {
     setFormShortID("");
     setFormFingerprint("ios");
     setFormObfsPassword("");
-    setServerSearchQuery("");
-    setBridgeSearchQuery("");
     setSniProbeResult(null);
 
     // Reverse specifics
@@ -582,8 +580,6 @@ const TunnelContent = () => {
     setFormControlPort(rule.control_port || 27888);
     setFormTunnelSecret(rule.tunnel_secret || "");
     setFormObfsPassword(rule.obfs_password || "");
-    setServerSearchQuery("");
-    setBridgeSearchQuery("");
     setSniProbeResult(null);
 
     setForm2FaCode("");

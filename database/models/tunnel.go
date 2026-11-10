@@ -7,7 +7,7 @@ type TunnelRule struct {
 	Id               string    `json:"id" gorm:"type:varchar(64);primaryKey"`
 	ClientUUID       string    `json:"client_uuid" gorm:"type:varchar(64);index;not null"`
 	Name             string    `json:"name" gorm:"type:varchar(128);not null"`
-	RuleType         string    `json:"rule_type" gorm:"type:varchar(32);not null;default:'forward'"` // forward, vless, socks5, shadowsocks, trojan, hysteria2
+	RuleType         string    `json:"rule_type" gorm:"type:varchar(32);not null;default:'forward'"` // forward, vless, socks5, shadowsocks, trojan, hysteria2, tuic
 	ListenPort       int       `json:"listen_port" gorm:"type:int;not null"`
 	Protocol         string    `json:"protocol" gorm:"type:varchar(16);not null;default:'tcp'"` // tcp, udp, both
 	TargetType       string    `json:"target_type" gorm:"type:varchar(16);not null;default:'local'"` // local, custom
@@ -28,6 +28,9 @@ type TunnelRule struct {
 	PublicKey  string `json:"public_key" gorm:"type:varchar(255)"` // Reality x25519 公钥 (用于生成客户端链接)
 	ShortID    string `json:"short_id" gorm:"type:varchar(64)"` // Reality Short ID
 	Fingerprint string `json:"fingerprint" gorm:"type:varchar(64);default:'ios'"` // Reality 客户端 TLS 指纹 (ios, edge, chrome, random)
+	ObfsPassword string `json:"obfs_password" gorm:"type:varchar(255)"` // Hysteria 2 Salamander 混淆密码
+	ObfsType     string `json:"obfs_type" gorm:"type:varchar(64);default:'salamander'"` // 混淆类型
+
 
 	// 跨节点反向穿透专用字段 (Reverse Proxy / NAT Traversal)
 	IsReverse        bool   `json:"is_reverse" gorm:"default:false"`

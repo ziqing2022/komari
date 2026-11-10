@@ -149,6 +149,7 @@ func registerAdminRoutes(r *gin.Engine) {
 	{
 		tunnelGroup.GET("", admin.ListTunnels)
 		tunnelGroup.GET("/generate_keys", admin.GenerateTunnelKeys)
+		tunnelGroup.POST("/sni-probe", admin.ProbeSNI)
 		tunnelGroup.POST("", api.RequireSensitive2FA(), admin.CreateTunnel)
 		tunnelGroup.PUT("/:id", api.RequireSensitive2FA(), admin.UpdateTunnel)
 		tunnelGroup.DELETE("/:id", api.RequireSensitive2FA(), admin.DeleteTunnel)

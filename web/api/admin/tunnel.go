@@ -3,9 +3,11 @@ package admin
 import (
 	"crypto/ecdh"
 	"crypto/rand"
+	"crypto/tls"
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -22,7 +24,7 @@ type TunnelRuleInput struct {
 	Id               string `json:"id"`
 	ClientUUID       string `json:"client_uuid"`
 	Name             string `json:"name"`
-	RuleType         string `json:"rule_type"` // forward, vless, socks5, shadowsocks, trojan, hysteria2
+	RuleType         string `json:"rule_type"` // forward, vless, socks5, shadowsocks, trojan, hysteria2, tuic
 	ListenPort       int    `json:"listen_port"`
 	Protocol         string `json:"protocol"` // tcp, udp, both
 	TargetType       string `json:"target_type"` // local, custom
@@ -32,15 +34,17 @@ type TunnelRuleInput struct {
 	Enabled          *bool  `json:"enabled"`
 
 	// 高级协议专用字段
-	UUID       string `json:"uuid"`
-	Password   string `json:"password"`
-	Username   string `json:"username"`
-	Method     string `json:"method"`
-	SNI        string `json:"sni"`
-	PrivateKey string `json:"private_key"`
-	PublicKey  string `json:"public_key"`
-	ShortID    string `json:"short_id"`
-	Fingerprint string `json:"fingerprint"`
+	UUID         string `json:"uuid"`
+	Password     string `json:"password"`
+	Username     string `json:"username"`
+	Method       string `json:"method"`
+	SNI          string `json:"sni"`
+	PrivateKey   string `json:"private_key"`
+	PublicKey    string `json:"public_key"`
+	ShortID      string `json:"short_id"`
+	Fingerprint  string `json:"fingerprint"`
+	ObfsPassword string `json:"obfs_password"`
+	ObfsType     string `json:"obfs_type"`
 
 	// 跨节点反向穿透专用字段
 	IsReverse        *bool  `json:"is_reverse"`
@@ -225,6 +229,8 @@ func CreateTunnel(c *gin.Context) {
 		PublicKey:        input.PublicKey,
 		ShortID:          input.ShortID,
 		Fingerprint:      input.Fingerprint,
+		ObfsPassword:     input.ObfsPassword,
+		ObfsType:         input.ObfsType,
 		IsReverse:        isReverse,
 		BridgeClientUUID: bridgeClientUUID,
 		BridgeHost:       bridgeHost,
@@ -337,6 +343,12 @@ func UpdateTunnel(c *gin.Context) {
 	}
 	if input.Fingerprint != "" {
 		rule.Fingerprint = input.Fingerprint
+	}
+	if input.ObfsPassword != "" {
+		rule.ObfsPassword = input.ObfsPassword
+	}
+	if input.ObfsType != "" {
+		rule.ObfsType = input.ObfsType
 	}
 
 	// 更新反向穿透字段
@@ -463,5 +475,49 @@ func ToggleTunnel(c *gin.Context) {
 		"status":  "success",
 		"message": "Tunnel toggled successfully",
 		"data":    rule,
+	})
+}
+
+// SniProbeInput SNI 测活入参
+type SniProbeInput struct {
+	SNI string `json:"sni"`
+}
+
+// ProbeSNI 一键快速测活 SNI 域名 TLS 1.3 支持与 ALPN
+func ProbeSNI(c *gin.Context) {
+	var input SniProbeInput
+	if err := c.ShouldBindJSON(&input); err != nil || strings.TrimSpace(input.SNI) == "" {
+		api.RespondError(c, http.StatusBadRequest, "SNI domain is required")
+		return
+	}
+	sni := strings.TrimSpace(input.SNI)
+	dialer := &net.Dialer{Timeout: 5 * time.Second}
+	start := time.Now()
+	conn, err := tls.DialWithDialer(dialer, "tcp", sni+":443", &tls.Config{
+		ServerName: sni,
+		NextProtos: []string{"h2", "http/1.1"},
+	})
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{
+			"status": "error",
+			"error":  err.Error(),
+			"sni":    sni,
+		})
+		return
+	}
+	defer conn.Close()
+	rtt := time.Since(start).Milliseconds()
+	state := conn.ConnectionState()
+	tlsVer := "TLS 1.2"
+	if state.Version == tls.VersionTLS13 {
+		tlsVer = "TLS 1.3"
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"status":      "success",
+		"sni":         sni,
+		"tls_version": tlsVer,
+		"alpn":        state.NegotiatedProtocol,
+		"rtt_ms":      rtt,
+		"is_tls13":    state.Version == tls.VersionTLS13,
 	})
 }

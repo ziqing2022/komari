@@ -19,6 +19,7 @@ import (
 	"github.com/komari-monitor/komari/internal/lifecycle"
 	"github.com/komari-monitor/komari/internal/metricstore"
 	"github.com/komari-monitor/komari/pkg/rpc"
+	agent_runtime "github.com/komari-monitor/komari/web/agent"
 )
 
 // admin.misc.go
@@ -188,6 +189,14 @@ func adminEditSettings(ctx context.Context, req *rpc.JsonRpcRequest) (any, *rpc.
 
 	if err := config.SetMany(cfg); err != nil {
 		return nil, rpc.MakeError(rpc.InternalError, "Failed to update settings: "+err.Error(), nil)
+	}
+
+	if _, ok := cfg["agent_primary_endpoint"]; ok {
+		go agent_runtime.SyncAllClientEndpoints()
+	} else if _, ok := cfg["agent_backup_endpoints"]; ok {
+		go agent_runtime.SyncAllClientEndpoints()
+	} else if _, ok := cfg["script_domain"]; ok {
+		go agent_runtime.SyncAllClientEndpoints()
 	}
 
 	// 配置已落库，热重载 metric store（无需重启）。旧结构必须在下一次

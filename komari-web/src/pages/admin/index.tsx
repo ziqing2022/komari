@@ -293,6 +293,9 @@ const AutoDiscoverySection = ({
 
   const generateCommand = () => {
     const host = (function () {
+      if (settings?.agent_primary_endpoint) {
+        return settings.agent_primary_endpoint.replace(/\/+$/, "");
+      }
       if (!settings?.script_domain) {
         return window.location.origin;
       }
@@ -302,6 +305,14 @@ const AutoDiscoverySection = ({
       return `http://${settings.script_domain.replace(/\/+$/, "")}`;
     })();
     const args: string[] = ["-e", host, "--auto-discovery", adKey];
+    const backupEndpoints = (settings?.agent_backup_endpoints || "")
+      .split(/[\n,]/)
+      .map((s: string) => s.trim())
+      .filter(Boolean)
+      .join(",");
+    if (backupEndpoints) {
+      args.push("--endpoints", backupEndpoints);
+    }
     if (installOptions.disableWebSsh) {
       args.push("--disable-web-ssh");
     }
@@ -1599,7 +1610,10 @@ function GenerateCommandButton({
   }, [isSnapshotBackend]);
 
   const generateCommand = () => {
-    const host = function () {
+    const host = (function () {
+      if (settings?.agent_primary_endpoint) {
+        return settings.agent_primary_endpoint.replace(/\/+$/, "");
+      }
       if (!settings.script_domain) {
         return window.location.origin;
       }
@@ -1607,9 +1621,17 @@ function GenerateCommandButton({
         return settings.script_domain.replace(/\/+$/, "");
       }
       return `http://${settings.script_domain.replace(/\/+$/, "")}`;
-    }();
+    })();
     const token = node.token || "";
     let args = ["-e", host, "-t", token];
+    const backupEndpoints = (settings?.agent_backup_endpoints || "")
+      .split(/[\n,]/)
+      .map((s: string) => s.trim())
+      .filter(Boolean)
+      .join(",");
+    if (backupEndpoints) {
+      args.push("--endpoints", backupEndpoints);
+    }
     // 根据安装选项生成参数
     if (installOptions.disableWebSsh) {
       args.push("--disable-web-ssh");

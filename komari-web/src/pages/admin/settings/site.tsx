@@ -164,6 +164,33 @@ export default function SiteSettings() {
           await updateSettingsWithToast({ script_domain: data }, t);
         }}
       />
+      <SettingCardLabel>
+        {t("settings.site.agent_failover_section", "Agent 通信与多域名容灾漂移 (Failover & Zero-Touch Migration)")}
+      </SettingCardLabel>
+      <SettingCardShortTextInput
+        title={t("settings.site.agent_primary_endpoint", "Agent 主连接地址 (Primary Endpoint)")}
+        description={t(
+          "settings.site.agent_primary_endpoint_desc",
+          "Agent 首选通信地址。留空则默认回退使用脚本域名或当前面板 Origin。保存后自动热推下发至所有在线客户端。"
+        )}
+        placeholder={`${window.location.origin}`}
+        defaultValue={settings.agent_primary_endpoint || ""}
+        OnSave={async (data) => {
+          await updateSettingsWithToast({ agent_primary_endpoint: data }, t);
+        }}
+      />
+      <SettingCardLongTextInput
+        title={t("settings.site.agent_backup_endpoints", "Agent 备用逃生地址池 (Backup Endpoints)")}
+        description={t(
+          "settings.site.agent_backup_endpoints_desc",
+          "支持配置多个备用域名或直连 IP:Port（如 http://168.107.21.149:25774），每行一个或逗号分隔。当主域名被封或失效时，Agent 自动漂移至可用备用地址并粘性持久化。换机时在此填入新服务器地址即可实现存量小鸡零接触平滑迁移。"
+        )}
+        placeholder={"https://backup.domain.com\nhttp://168.107.21.149:25774"}
+        defaultValue={settings.agent_backup_endpoints || ""}
+        OnSave={async (data) => {
+          await updateSettingsWithToast({ agent_backup_endpoints: data }, t);
+        }}
+      />
       <SettingCardLabel>{t("settings.site.private_site")}</SettingCardLabel>
       <SettingCardSwitch
         title={t("settings.site.private_site")}

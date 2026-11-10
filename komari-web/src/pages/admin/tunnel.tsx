@@ -35,7 +35,7 @@ import { toast } from "sonner";
 import { NodeDetailsProvider, useNodeDetails, type NodeDetail } from "@/contexts/NodeDetailsContext";
 import Loading from "@/components/loading";
 
-export type RuleType = "forward" | "vless" | "socks5" | "shadowsocks" | "trojan" | "hysteria2";
+export type RuleType = "forward" | "vless" | "socks5" | "shadowsocks" | "trojan" | "hysteria2" | "tuic";
 
 export interface TunnelRule {
   id: string;
@@ -61,6 +61,8 @@ export interface TunnelRule {
   public_key?: string;
   short_id?: string;
   fingerprint?: string;
+  obfs_password?: string;
+  obfs_type?: string;
 
   // 跨节点反向穿透专用字段
   is_reverse?: boolean;
@@ -130,6 +132,33 @@ const TunnelContent = () => {
   const [formBridgePort, setFormBridgePort] = useState<number | "">("");
   const [formControlPort, setFormControlPort] = useState<number | "">(27888);
   const [formTunnelSecret, setFormTunnelSecret] = useState("");
+  const [formObfsPassword, setFormObfsPassword] = useState("");
+
+  // 搜索过滤与 SNI 测活状态
+  const [serverSearchQuery, setServerSearchQuery] = useState("");
+  const [bridgeSearchQuery, setBridgeSearchQuery] = useState("");
+  const [sniProbing, setSniProbing] = useState(false);
+  const [sniProbeResult, setSniProbeResult] = useState<{
+    status?: string;
+    tls_version?: string;
+    alpn?: string;
+    rtt_ms?: number;
+    is_tls13?: boolean;
+    error?: string;
+  } | null>(null);
+
+  const CURATED_SNIS = [
+    { name: "微软 Teams", domain: "teams.microsoft.com" },
+    { name: "微软 Azure", domain: "azure.microsoft.com" },
+    { name: "必应国际", domain: "www.bing.com" },
+    { name: "苹果官网", domain: "www.apple.com" },
+    { name: "苹果 iCloud", domain: "gateway.icloud.com" },
+    { name: "苹果 CDN", domain: "images.apple.com" },
+    { name: "亚马逊 AWS", domain: "aws.amazon.com" },
+    { name: "Cloudflare", domain: "dash.cloudflare.com" },
+    { name: "英伟达", domain: "www.nvidia.com" },
+    { name: "甲骨文云", domain: "www.oracle.com" },
+  ];
 
   const [form2FaCode, setForm2FaCode] = useState("");
   const [saving, setSaving] = useState(false);
@@ -265,6 +294,38 @@ const TunnelContent = () => {
     toast.success("已通过本地生成安全随机凭据");
   };
 
+  // One-click SNI TLS 1.3 health probe
+  const handleProbeSNI = async (targetSni: string) => {
+    const sni = (targetSni || "").trim();
+    if (!sni) {
+      toast.error("请输入或选择伪装域名 (SNI)");
+      return;
+    }
+    setSniProbing(true);
+    setSniProbeResult(null);
+    try {
+      const res = await fetch("/api/admin/tunnel/sni-probe", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sni }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.status === "success") {
+        setSniProbeResult(data);
+        toast.success(`SNI 测活成功: ${data.tls_version} (${data.alpn || "None"}) - ${data.rtt_ms}ms`);
+      } else {
+        const errMsg = data.error || data.message || "握手探测失败";
+        setSniProbeResult({ status: "error", error: errMsg });
+        toast.error(`测活失败: ${errMsg}`);
+      }
+    } catch (e: any) {
+      setSniProbeResult({ status: "error", error: e.message || "网络请求异常" });
+      toast.error(`测活异常: ${e.message}`);
+    } finally {
+      setSniProbing(false);
+    }
+  };
+
   // Open Create Dialog
   const handleOpenCreate = (defaultType: RuleType = "forward") => {
     setEditingRule(null);
@@ -290,6 +351,10 @@ const TunnelContent = () => {
     setFormPublicKey("");
     setFormShortID("");
     setFormFingerprint("ios");
+    setFormObfsPassword("");
+    setServerSearchQuery("");
+    setBridgeSearchQuery("");
+    setSniProbeResult(null);
 
     // Reverse specifics
     setFormIsReverse(false);
@@ -301,8 +366,8 @@ const TunnelContent = () => {
 
     setForm2FaCode("");
 
-    // Auto-generate keys for vless
-    if (defaultType === "vless" || defaultType === "shadowsocks" || defaultType === "socks5") {
+    // Auto-generate keys for vless / tuic
+    if (defaultType === "vless" || defaultType === "tuic" || defaultType === "shadowsocks" || defaultType === "socks5") {
       setTimeout(() => handleGenerateCredentials(), 100);
     }
 
@@ -340,6 +405,10 @@ const TunnelContent = () => {
     setFormBridgePort(rule.bridge_port || rule.listen_port || "");
     setFormControlPort(rule.control_port || 27888);
     setFormTunnelSecret(rule.tunnel_secret || "");
+    setFormObfsPassword(rule.obfs_password || "");
+    setServerSearchQuery("");
+    setBridgeSearchQuery("");
+    setSniProbeResult(null);
 
     setForm2FaCode("");
     setEditDialogOpen(true);
@@ -380,11 +449,25 @@ const TunnelContent = () => {
         toast.error("REALITY 模式需要配置私钥，可点击「一键生成」");
         return;
       }
+    } else if (formRuleType === "tuic") {
+      if (!formUUID.trim()) {
+        toast.error("TUIC 协议需要配置 UUID，可点击「一键生成」");
+        return;
+      }
+      if (!formPassword.trim()) {
+        toast.error("TUIC 协议需要设置密码，可点击「一键生成」");
+        return;
+      }
     } else if (formRuleType === "shadowsocks" || formRuleType === "trojan" || formRuleType === "hysteria2") {
       if (!formPassword.trim()) {
         toast.error("该协议需要设置密码，可点击「一键生成」");
         return;
       }
+    }
+
+    if (formIsReverse && !formBridgeHost.trim()) {
+      toast.error("跨机反向穿透模式必须填写或选择中转机公网 IP / 域名");
+      return;
     }
 
     const clean2FaCode = form2FaCode.replace(/[\s-]/g, "").trim();
@@ -414,6 +497,8 @@ const TunnelContent = () => {
       public_key: formPublicKey.trim(),
       short_id: formShortID.trim(),
       fingerprint: formFingerprint,
+      obfs_password: formObfsPassword.trim(),
+      obfs_type: "salamander",
 
       is_reverse: formIsReverse,
       bridge_client_uuid: formBridgeClientUUID,
@@ -564,12 +649,19 @@ const TunnelContent = () => {
     }
   };
 
-  // Copy Client Node / Share Link
+  // Copy Client Node / Share Link (智能计算中转出口)
   const handleCopyShareLink = (rule: TunnelRule) => {
     const server = serverMap.get(rule.client_uuid);
-    const serverHost = server?.ipv4 || server?.ipv6 || server?.name || "127.0.0.1";
-    let shareLink = "";
+    // 智能公网出口识别：若为跨机反向穿透，自动替换为中转桥接机的公网 IP 与出口端口
+    let targetHost = server?.ipv4 || server?.ipv6 || server?.name || "127.0.0.1";
+    let targetPort = rule.listen_port;
 
+    if (rule.is_reverse && rule.bridge_host) {
+      targetHost = rule.bridge_host;
+      targetPort = rule.bridge_port || rule.listen_port;
+    }
+
+    let shareLink = "";
     const ruleType = rule.rule_type || "forward";
     const nameTag = encodeURIComponent(rule.name);
 
@@ -578,30 +670,38 @@ const TunnelContent = () => {
       const pbk = rule.public_key || "";
       const sid = rule.short_id || "";
       const fp = rule.fingerprint || "ios";
-      shareLink = `vless://${rule.uuid}@${serverHost}:${rule.listen_port}?encryption=none&flow=xtls-rprx-vision&security=reality&sni=${sni}&fp=${fp}&pbk=${pbk}&sid=${sid}&type=tcp#${nameTag}`;
+      shareLink = `vless://${rule.uuid}@${targetHost}:${targetPort}?encryption=none&flow=xtls-rprx-vision&security=reality&sni=${sni}&fp=${fp}&pbk=${pbk}&sid=${sid}&type=tcp#${nameTag}`;
+    } else if (ruleType === "tuic") {
+      const sni = rule.sni || "gateway.icloud.com";
+      shareLink = `tuic://${rule.uuid}:${rule.password}@${targetHost}:${targetPort}?congestion_control=bbr&alpn=h3&sni=${sni}&insecure=1#${nameTag}`;
+    } else if (ruleType === "hysteria2") {
+      const sni = rule.sni || "gateway.icloud.com";
+      const obfs = rule.obfs_password ? `&obfs=salamander&obfs-password=${rule.obfs_password}` : "";
+      shareLink = `hysteria2://${rule.password}@${targetHost}:${targetPort}?sni=${sni}&insecure=1${obfs}#${nameTag}`;
     } else if (ruleType === "socks5") {
       if (rule.password) {
-        shareLink = `socks5://${rule.username || "komari"}:${rule.password}@${serverHost}:${rule.listen_port}#${nameTag}`;
+        shareLink = `socks5://${rule.username || "komari"}:${rule.password}@${targetHost}:${targetPort}#${nameTag}`;
       } else {
-        shareLink = `socks5://${serverHost}:${rule.listen_port}#${nameTag}`;
+        shareLink = `socks5://${targetHost}:${targetPort}#${nameTag}`;
       }
     } else if (ruleType === "shadowsocks") {
       const method = rule.method || "2022-blake3-aes-128-gcm";
       const userinfo = btoa(`${method}:${rule.password}`);
-      shareLink = `ss://${userinfo}@${serverHost}:${rule.listen_port}#${nameTag}`;
+      shareLink = `ss://${userinfo}@${targetHost}:${targetPort}#${nameTag}`;
     } else if (ruleType === "trojan") {
       const sni = rule.sni || "gateway.icloud.com";
-      shareLink = `trojan://${rule.password}@${serverHost}:${rule.listen_port}?security=tls&sni=${sni}#${nameTag}`;
-    } else if (ruleType === "hysteria2") {
-      const sni = rule.sni || "gateway.icloud.com";
-      shareLink = `hysteria2://${rule.password}@${serverHost}:${rule.listen_port}?sni=${sni}&insecure=1#${nameTag}`;
+      shareLink = `trojan://${rule.password}@${targetHost}:${targetPort}?security=tls&sni=${sni}#${nameTag}`;
     } else {
       // forward
-      shareLink = `${serverHost}:${rule.listen_port}`;
+      shareLink = `${targetHost}:${targetPort}`;
     }
 
     navigator.clipboard.writeText(shareLink);
-    toast.success("已复制节点/连接链接到剪贴板！可以直接导入客户端使用。");
+    if (rule.is_reverse && rule.bridge_host) {
+      toast.success(`已复制节点链接！(已自动绑定中转公网出口 ${targetHost}:${targetPort})`);
+    } else {
+      toast.success("已复制节点/连接链接到剪贴板！可以直接导入客户端使用。");
+    }
   };
 
   // Filtered tunnels
@@ -790,9 +890,21 @@ const TunnelContent = () => {
                           Hysteria 2
                         </Badge>
                       )}
+                      {ruleType === "tuic" && (
+                        <Badge color="teal" variant="solid" className="flex items-center gap-1">
+                          <Zap className="w-3 h-3" />
+                          TUIC v5
+                        </Badge>
+                      )}
                       {ruleType === "trojan" && (
                         <Badge color="indigo" variant="solid">
                           Trojan
+                        </Badge>
+                      )}
+                      {rule.is_reverse && ruleType !== "forward" && (
+                        <Badge color="cyan" variant="soft" className="flex items-center gap-1 font-mono">
+                          <Radio className="w-3 h-3 text-cyan-600" />
+                          <span>跨机出口: {rule.bridge_host}:{rule.bridge_port || rule.listen_port}</span>
                         </Badge>
                       )}
                       {ruleType === "forward" && (
@@ -907,7 +1019,39 @@ const TunnelContent = () => {
                             </div>
                           )}
 
-                          {(ruleType === "trojan" || ruleType === "hysteria2") && (
+                          {ruleType === "tuic" && (
+                            <>
+                              <div>
+                                <span className="text-gray-400">SNI: </span>
+                                <span className="font-mono text-teal-600 dark:text-teal-400">{rule.sni || "gateway.icloud.com"}</span>
+                              </div>
+                              <div>
+                                <span className="text-gray-400">UUID: </span>
+                                <span className="font-mono">{rule.uuid ? `${rule.uuid.slice(0, 8)}...` : "-"}</span>
+                              </div>
+                              <div>
+                                <span className="text-gray-400">协议: </span>
+                                <span className="font-mono text-xs">h3 / BBR</span>
+                              </div>
+                            </>
+                          )}
+
+                          {ruleType === "hysteria2" && (
+                            <>
+                              <div>
+                                <span className="text-gray-400">SNI: </span>
+                                <span className="font-mono text-pink-600">{rule.sni || "gateway.icloud.com"}</span>
+                              </div>
+                              {rule.obfs_password && (
+                                <div>
+                                  <span className="text-gray-400">Salamander 混淆: </span>
+                                  <span className="font-mono text-pink-600 font-bold">{rule.obfs_password}</span>
+                                </div>
+                              )}
+                            </>
+                          )}
+
+                          {ruleType === "trojan" && (
                             <div>
                               <span className="text-gray-400">伪装域名 (SNI): </span>
                               <span className="font-mono">{rule.sni || "gateway.icloud.com"}</span>
@@ -983,24 +1127,50 @@ const TunnelContent = () => {
           <div className="space-y-4 max-h-[75vh] overflow-y-auto pr-1">
             {/* Server Node Selection */}
             <div>
-              <Text as="label" size="2" weight="bold" className="block mb-1">
-                {t("tunnel.server", "所属节点")} *
-              </Text>
-              <Select.Root
-                value={formClientUUID}
-                onValueChange={setFormClientUUID}
-                disabled={Boolean(editingRule)}
-              >
-                <Select.Trigger className="w-full" placeholder={t("tunnel.selectServer", "选择服务器节点")} />
-                <Select.Content>
-                  {nodeDetail &&
-                    nodeDetail.map((node) => (
-                      <Select.Item key={node.uuid} value={node.uuid}>
-                        {node.name || node.uuid} ({node.ipv4 || "IPv4"})
-                      </Select.Item>
-                    ))}
-                </Select.Content>
-              </Select.Root>
+              <div className="flex items-center justify-between mb-1">
+                <Text as="label" size="2" weight="bold">
+                  {t("tunnel.server", "所属节点")} *
+                </Text>
+                {nodeDetail && nodeDetail.length > 3 && (
+                  <span className="text-[11px] text-gray-400">支持输入名称或 IP 实时过滤</span>
+                )}
+              </div>
+              <div className="space-y-1.5">
+                {!editingRule && nodeDetail && nodeDetail.length > 3 && (
+                  <TextField.Root
+                    size="1"
+                    placeholder="🔍 搜索服务器名称或 IP..."
+                    value={serverSearchQuery}
+                    onChange={(e) => setServerSearchQuery(e.target.value)}
+                  />
+                )}
+                <Select.Root
+                  value={formClientUUID}
+                  onValueChange={setFormClientUUID}
+                  disabled={Boolean(editingRule)}
+                >
+                  <Select.Trigger className="w-full" placeholder={t("tunnel.selectServer", "选择服务器节点")} />
+                  <Select.Content>
+                    {nodeDetail &&
+                      nodeDetail
+                        .filter((node) => {
+                          if (!serverSearchQuery.trim()) return true;
+                          const q = serverSearchQuery.trim().toLowerCase();
+                          return (
+                            (node.name || "").toLowerCase().includes(q) ||
+                            (node.ipv4 || "").toLowerCase().includes(q) ||
+                            (node.ipv6 || "").toLowerCase().includes(q) ||
+                            (node.uuid || "").toLowerCase().includes(q)
+                          );
+                        })
+                        .map((node) => (
+                          <Select.Item key={node.uuid} value={node.uuid}>
+                            {node.name || node.uuid} ({node.ipv4 || "无IPv4"})
+                          </Select.Item>
+                        ))}
+                  </Select.Content>
+                </Select.Root>
+              </div>
             </div>
 
             {/* Protocol Type Selector */}
@@ -1008,14 +1178,15 @@ const TunnelContent = () => {
               <Text as="label" size="2" weight="bold" className="block mb-1">
                 功能与协议类型 *
               </Text>
-              <div className="grid grid-cols-3 gap-2">
+              <div className="grid grid-cols-4 gap-2">
                 {[
-                  { id: "forward", label: "端口转发 (Direct)", icon: Radio },
-                  { id: "vless", label: "VLESS + REALITY", icon: Sparkles },
-                  { id: "socks5", label: "SOCKS5 代理", icon: KeyRound },
-                  { id: "shadowsocks", label: "Shadowsocks", icon: Lock },
-                  { id: "trojan", label: "Trojan 代理", icon: ShieldCheck },
+                  { id: "forward", label: "端口转发", icon: Radio },
+                  { id: "vless", label: "VLESS Reality", icon: Sparkles },
+                  { id: "tuic", label: "TUIC v5", icon: Zap },
                   { id: "hysteria2", label: "Hysteria 2", icon: Zap },
+                  { id: "shadowsocks", label: "Shadowsocks", icon: Lock },
+                  { id: "trojan", label: "Trojan", icon: ShieldCheck },
+                  { id: "socks5", label: "SOCKS5", icon: KeyRound },
                 ].map((item) => (
                   <button
                     key={item.id}
@@ -1026,13 +1197,13 @@ const TunnelContent = () => {
                       if (nextType === "vless" && (!formListenPort || formListenPort === 8080)) {
                         setFormListenPort(443);
                       }
-                      if (nextType === "vless" || nextType === "socks5" || nextType === "shadowsocks") {
+                      if (nextType === "vless" || nextType === "tuic" || nextType === "socks5" || nextType === "shadowsocks") {
                         if (!formUUID && !formPassword) {
                           handleGenerateCredentials();
                         }
                       }
                     }}
-                    className={`flex items-center justify-center gap-1.5 p-2 rounded-lg border text-xs font-semibold transition-all ${
+                    className={`flex items-center justify-center gap-1 p-2 rounded-lg border text-xs font-semibold transition-all ${
                       formRuleType === item.id
                         ? "border-blue-500 bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300 dark:border-blue-600 shadow-sm"
                         : "border-gray-200 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-300"
@@ -1043,6 +1214,140 @@ const TunnelContent = () => {
                   </button>
                 ))}
               </div>
+            </div>
+
+            {/* 网络出口类型单选 (表单合并关键) */}
+            <div className="space-y-2 border border-blue-200/60 dark:border-blue-900/40 p-3 rounded-lg bg-blue-50/20 dark:bg-blue-950/10">
+              <div className="flex items-center justify-between">
+                <Text as="label" size="2" weight="bold" className="text-blue-950 dark:text-blue-200">
+                  网络出口类型（单选） *
+                </Text>
+                <span className="text-[11px] text-gray-500">统一内网与公网规则</span>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setFormIsReverse(false)}
+                  className={`p-2.5 rounded-lg border text-left transition-all ${
+                    !formIsReverse
+                      ? "border-blue-500 bg-white dark:bg-gray-800 ring-2 ring-blue-500/20 shadow-sm"
+                      : "border-gray-200 dark:border-gray-700 bg-gray-50/50 dark:bg-gray-800/40 opacity-70"
+                  }`}
+                >
+                  <div className="font-semibold text-xs text-blue-600 dark:text-blue-400">
+                    ● 本机直连出口
+                  </div>
+                  <div className="text-[11px] text-gray-500 mt-0.5">
+                    机器有公网 IP，直接对外监听
+                  </div>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setFormIsReverse(true)}
+                  className={`p-2.5 rounded-lg border text-left transition-all ${
+                    formIsReverse
+                      ? "border-purple-500 bg-white dark:bg-gray-800 ring-2 ring-purple-500/20 shadow-sm"
+                      : "border-gray-200 dark:border-gray-700 bg-gray-50/50 dark:bg-gray-800/40 opacity-70"
+                  }`}
+                >
+                  <div className="font-semibold text-xs text-purple-600 dark:text-purple-400">
+                    ● 跨机反向穿透中转
+                  </div>
+                  <div className="text-[11px] text-gray-500 mt-0.5">
+                    无公网内网/NAT小鸡，流量拉到中转机
+                  </div>
+                </button>
+              </div>
+
+              {/* 展开跨机中转配置 */}
+              {formIsReverse && (
+                <div className="mt-2.5 pt-2.5 border-t border-blue-100 dark:border-blue-900/30 space-y-3">
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-xs font-semibold text-purple-900 dark:text-purple-300">
+                        中转公网服务器 (Bridge Node) *
+                      </span>
+                    </div>
+                    {nodeDetail && nodeDetail.length > 3 && (
+                      <TextField.Root
+                        size="1"
+                        placeholder="🔍 搜索中转机名称或 IP..."
+                        value={bridgeSearchQuery}
+                        onChange={(e) => setBridgeSearchQuery(e.target.value)}
+                        className="mb-1"
+                      />
+                    )}
+                    <Select.Root
+                      value={formBridgeClientUUID}
+                      onValueChange={(val) => {
+                        setFormBridgeClientUUID(val);
+                        if (val !== "custom") {
+                          const node = serverMap.get(val);
+                          if (node?.ipv4) {
+                            setFormBridgeHost(node.ipv4);
+                          }
+                        } else {
+                          setFormBridgeHost("");
+                        }
+                      }}
+                    >
+                      <Select.Trigger className="w-full" placeholder="请选择公网中转机或自定义" />
+                      <Select.Content>
+                        <Select.Group>
+                          <Select.Label>纳管节点</Select.Label>
+                          {nodeDetail &&
+                            nodeDetail
+                              .filter((n) => n?.uuid && n.uuid !== formClientUUID)
+                              .filter((n) => {
+                                if (!bridgeSearchQuery.trim()) return true;
+                                const q = bridgeSearchQuery.trim().toLowerCase();
+                                return (
+                                  (n.name || "").toLowerCase().includes(q) ||
+                                  (n.ipv4 || "").toLowerCase().includes(q)
+                                );
+                              })
+                              .map((n) => (
+                                <Select.Item key={n.uuid} value={n.uuid}>
+                                  {n.name} {n.ipv4 ? `(${n.ipv4})` : ""}
+                                </Select.Item>
+                              ))}
+                        </Select.Group>
+                        <Select.Separator />
+                        <Select.Group>
+                          <Select.Item value="custom">
+                            🌐 自定义公网机器 (手动输入公网 IP 或域名)
+                          </Select.Item>
+                        </Select.Group>
+                      </Select.Content>
+                    </Select.Root>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <span className="text-xs font-semibold text-gray-700 dark:text-gray-300 block mb-1">
+                        中转机公网 IP / 域名 *
+                      </span>
+                      <TextField.Root
+                        placeholder="例如: 158.179.168.46"
+                        value={formBridgeHost}
+                        onChange={(e) => setFormBridgeHost(e.target.value)}
+                      />
+                    </div>
+                    <div>
+                      <span className="text-xs font-semibold text-gray-700 dark:text-gray-300 block mb-1">
+                        中转公网暴露端口 *
+                      </span>
+                      <TextField.Root
+                        type="number"
+                        placeholder="例如: 20988 或 10085"
+                        value={formBridgePort}
+                        onChange={(e) => setFormBridgePort(e.target.value === "" ? "" : Number(e.target.value))}
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Rule Name */}
@@ -1116,150 +1421,27 @@ const TunnelContent = () => {
             {/* Mode 1: Forwarding Specifics */}
             {formRuleType === "forward" && (
               <div className="space-y-3 border border-gray-100 dark:border-gray-800 p-3 rounded-lg bg-gray-50/50 dark:bg-gray-800/30">
-                {/* 模式切换：正向直接转发 vs 跨节点反向穿透 */}
-                <div>
-                  <Text as="label" size="2" weight="bold" className="block mb-2">
-                    转发映射模式
-                  </Text>
-                  <div className="grid grid-cols-2 gap-2 p-1 bg-gray-200/60 dark:bg-gray-900/60 rounded-lg">
-                    <button
-                      type="button"
-                      onClick={() => setFormIsReverse(false)}
-                      className={`flex items-center justify-center gap-1.5 py-1.5 px-3 rounded-md text-xs font-semibold transition-all ${
-                        !formIsReverse
-                          ? "bg-white dark:bg-gray-800 text-blue-600 dark:text-blue-400 shadow-sm"
-                          : "text-gray-600 dark:text-gray-400 hover:text-gray-900"
-                      }`}
-                    >
-                      <Radio className="w-3.5 h-3.5" />
-                      <span>正向直接转发</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setFormIsReverse(true)}
-                      className={`flex items-center justify-center gap-1.5 py-1.5 px-3 rounded-md text-xs font-semibold transition-all ${
-                        formIsReverse
-                          ? "bg-blue-600 text-white shadow-sm"
-                          : "text-gray-600 dark:text-gray-400 hover:text-gray-900"
-                      }`}
-                    >
-                      <Sparkles className="w-3.5 h-3.5" />
-                      <span>反向穿透 (内网 ➔ 公网)</span>
-                    </button>
-                  </div>
-                </div>
+                <Text size="2" weight="bold">
+                  {formIsReverse ? "内网反向穿透本地服务目标" : "正向端口转发目标"}
+                </Text>
 
                 {formIsReverse ? (
-                  /* 反向穿透模式专用表单 */
-                  <div className="space-y-3 pt-1 border-t border-gray-200/60 dark:border-gray-700/60">
-                    <div className="bg-blue-50/50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-900/40 p-2.5 rounded-md text-xs text-blue-800 dark:text-blue-300">
-                      💡 <strong>内网穿透说明</strong>：当前选中的节点将作为「内网端」，主动向指定的「公网暴露端」建立长连接反向隧道。外部访客访问公网节点端口即可直接访问内网服务！
-                    </div>
-
-                    <div>
-                      <Text as="label" size="2" weight="bold" className="block mb-1">
-                        公网暴露服务器 (Bridge Node) *
-                      </Text>
-                      <Select.Root
-                        value={formBridgeClientUUID}
-                        onValueChange={(val) => {
-                          setFormBridgeClientUUID(val);
-                          if (val !== "custom") {
-                            const node = serverMap.get(val);
-                            if (node?.ipv4) {
-                              setFormBridgeHost(node.ipv4);
-                            }
-                          } else {
-                            setFormBridgeHost("");
-                          }
-                        }}
-                      >
-                        <Select.Trigger className="w-full" placeholder="请选择公网机器或自定义" />
-                        <Select.Content>
-                          <Select.Group>
-                            <Select.Label>已有探针节点</Select.Label>
-                            {Array.isArray(nodeDetail) &&
-                              nodeDetail
-                                .filter((n) => n?.uuid && n.uuid !== formClientUUID)
-                                .map((n) => (
-                                  <Select.Item key={n.uuid} value={n.uuid}>
-                                    {n.name} {n.ipv4 ? `(${n.ipv4})` : ""}
-                                  </Select.Item>
-                                ))}
-                          </Select.Group>
-                          <Select.Separator />
-                          <Select.Group>
-                            <Select.Item value="custom">
-                              🌐 自定义公网机器 (手动输入公网 IP 或域名)
-                            </Select.Item>
-                          </Select.Group>
-                        </Select.Content>
-                      </Select.Root>
-                    </div>
-
-                    {formBridgeClientUUID === "custom" && (
-                      <div>
-                        <Text as="label" size="2" weight="medium" className="block mb-1">
-                          公网主机 IP 或域名 *
-                        </Text>
-                        <TextField.Root
-                          placeholder="例如：158.179.168.46 或 bridge.example.com"
-                          value={formBridgeHost}
-                          onChange={(e) => setFormBridgeHost(e.target.value)}
-                        />
-                      </div>
-                    )}
-
-                    <div className="grid grid-cols-2 gap-3">
-                      <div>
-                        <Text as="label" size="2" weight="bold" className="block mb-1">
-                          公网对外监听端口 *
-                        </Text>
-                        <TextField.Root
-                          type="number"
-                          placeholder="例如：8080"
-                          value={formBridgePort}
-                          onChange={(e) => setFormBridgePort(e.target.value === "" ? "" : Number(e.target.value))}
-                        />
-                        <Text size="1" color="gray" className="block mt-1">
-                          公网机上对外开放的访客端口
-                        </Text>
-                      </div>
-
-                      <div>
-                        <Text as="label" size="2" weight="medium" className="block mb-1">
-                          内部控制端口
-                        </Text>
-                        <TextField.Root
-                          type="number"
-                          placeholder="默认: 27888"
-                          value={formControlPort}
-                          onChange={(e) => setFormControlPort(e.target.value === "" ? "" : Number(e.target.value))}
-                        />
-                        <Text size="1" color="gray" className="block mt-1">
-                          节点间维持通信的内部端口
-                        </Text>
-                      </div>
-                    </div>
-
-                    <div>
-                      <Text as="label" size="2" weight="bold" className="block mb-1">
-                        内网本地服务目标端口 *
-                      </Text>
-                      <TextField.Root
-                        type="number"
-                        placeholder="例如：8080 (当前内网机器上的服务端口)"
-                        value={formTargetPort}
-                        onChange={(e) => setFormTargetPort(e.target.value === "" ? "" : Number(e.target.value))}
-                      />
-                      <Text size="1" color="gray" className="block mt-1">
-                        数据穿透后送达当前内网节点的 127.0.0.1 目标端口
-                      </Text>
-                    </div>
+                  <div>
+                    <Text as="label" size="2" weight="bold" className="block mb-1">
+                      内网本地服务目标端口 *
+                    </Text>
+                    <TextField.Root
+                      type="number"
+                      placeholder="例如：8080 (当前内网机器上的服务端口)"
+                      value={formTargetPort}
+                      onChange={(e) => setFormTargetPort(e.target.value === "" ? "" : Number(e.target.value))}
+                    />
+                    <Text size="1" color="gray" className="block mt-1">
+                      数据穿透后将送达当前内网节点的 127.0.0.1 目标端口
+                    </Text>
                   </div>
                 ) : (
-                  /* 原正向直接转发表单 */
-                  <div className="space-y-2 pt-1 border-t border-gray-200/60 dark:border-gray-700/60">
+                  <div className="space-y-2">
                     <Text as="label" size="2" weight="bold" className="block">
                       {t("tunnel.targetType", "远程目标类型")}
                     </Text>
@@ -1333,6 +1515,73 @@ const TunnelContent = () => {
               </div>
             )}
 
+            {/* SNI 伪装域名与一键测活组件 (适用所有 TLS 代理协议) */}
+            {(formRuleType === "vless" || formRuleType === "trojan" || formRuleType === "tuic" || formRuleType === "hysteria2") && (
+              <div className="space-y-2 border border-indigo-100 dark:border-indigo-900/40 p-3 rounded-lg bg-indigo-50/20 dark:bg-indigo-950/20">
+                <div className="flex items-center justify-between">
+                  <Text as="label" size="2" weight="bold" className="text-indigo-950 dark:text-indigo-200">
+                    伪装域名 (SNI / ServerName) *
+                  </Text>
+                  <Button
+                    size="1"
+                    variant="soft"
+                    color="indigo"
+                    type="button"
+                    loading={sniProbing}
+                    onClick={() => handleProbeSNI(formSNI)}
+                  >
+                    ⚡ 一键测活 TLS 1.3
+                  </Button>
+                </div>
+
+                <div className="flex gap-2">
+                  <div className="flex-1">
+                    <TextField.Root
+                      placeholder="例如：gateway.icloud.com"
+                      value={formSNI}
+                      onChange={(e) => {
+                        setFormSNI(e.target.value);
+                        setSniProbeResult(null);
+                      }}
+                    />
+                  </div>
+                  <Select.Root
+                    value=""
+                    onValueChange={(val) => {
+                      if (val) {
+                        setFormSNI(val);
+                        setSniProbeResult(null);
+                        handleProbeSNI(val);
+                      }
+                    }}
+                  >
+                    <Select.Trigger placeholder="优质冷门 SNI 库" />
+                    <Select.Content>
+                      {CURATED_SNIS.map((s) => (
+                        <Select.Item key={s.domain} value={s.domain}>
+                          {s.name} ({s.domain})
+                        </Select.Item>
+                      ))}
+                    </Select.Content>
+                  </Select.Root>
+                </div>
+
+                {sniProbeResult && (
+                  <div className="text-xs flex items-center gap-2 mt-1">
+                    {sniProbeResult.status === "success" || sniProbeResult.tls_version ? (
+                      <Badge color={sniProbeResult.is_tls13 ? "green" : "amber"} variant="soft">
+                        ✓ {sniProbeResult.tls_version} | ALPN: {sniProbeResult.alpn || "None"} | {sniProbeResult.rtt_ms}ms
+                      </Badge>
+                    ) : (
+                      <Badge color="red" variant="soft">
+                        ✗ 探测失败: {sniProbeResult.error}
+                      </Badge>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* Mode 2: VLESS REALITY Specifics */}
             {formRuleType === "vless" && (
               <div className="space-y-3 border border-purple-100 dark:border-purple-900/40 p-3.5 rounded-lg bg-purple-50/30 dark:bg-purple-950/20">
@@ -1352,20 +1601,6 @@ const TunnelContent = () => {
                     value={formUUID}
                     onChange={(e) => setFormUUID(e.target.value)}
                   />
-                </div>
-
-                <div>
-                  <Text as="label" size="2" weight="medium" className="block mb-1">
-                    伪装目标域名 (SNI) *
-                  </Text>
-                  <TextField.Root
-                    placeholder="例如：gateway.icloud.com 或 dl.google.com"
-                    value={formSNI}
-                    onChange={(e) => setFormSNI(e.target.value)}
-                  />
-                  <Text size="1" color="gray" className="block mt-1">
-                    推荐常用优质 SNI: gateway.icloud.com, itunes.apple.com, dl.google.com
-                  </Text>
                 </div>
 
                 <div className="grid grid-cols-2 gap-3">
@@ -1418,9 +1653,110 @@ const TunnelContent = () => {
                       <Select.Item value="firefox">firefox (火狐 Firefox 指纹)</Select.Item>
                     </Select.Content>
                   </Select.Root>
-                  <Text size="1" color="gray" className="block mt-1">
-                    注：当 SNI 为 gateway.icloud.com 等苹果域名时，推荐选择 ios 或 edge，可防止 Xray 客户端抗量子扩展引发握手中断。
+                </div>
+              </div>
+            )}
+
+            {/* Mode 3: TUIC v5 Specifics */}
+            {formRuleType === "tuic" && (
+              <div className="space-y-3 border border-teal-100 dark:border-teal-900/40 p-3.5 rounded-lg bg-teal-50/20 dark:bg-teal-950/20">
+                <Flex justify="between" align="center">
+                  <Text size="2" weight="bold" color="teal">
+                    TUIC v5 核心参数 (基于 QUIC / UDP)
                   </Text>
+                  <Badge color="teal" variant="soft">0-RTT · BBR</Badge>
+                </Flex>
+
+                <div>
+                  <Text as="label" size="2" weight="medium" className="block mb-1">
+                    用户 UUID *
+                  </Text>
+                  <TextField.Root
+                    placeholder="用户 UUID"
+                    value={formUUID}
+                    onChange={(e) => setFormUUID(e.target.value)}
+                  />
+                </div>
+
+                <div>
+                  <Text as="label" size="2" weight="medium" className="block mb-1">
+                    访问密码 (Password) *
+                  </Text>
+                  <TextField.Root
+                    placeholder="连接认证密码"
+                    value={formPassword}
+                    onChange={(e) => setFormPassword(e.target.value)}
+                  />
+                </div>
+
+                <div className="text-xs text-gray-500">
+                  💡 拥塞控制算法默认使用 <strong>BBR</strong>，应用层协议协商 (ALPN) 自动配置为 <strong>h3</strong>，证书自动签发并挂载。
+                </div>
+              </div>
+            )}
+
+            {/* Mode 4: Hysteria 2 Specifics */}
+            {formRuleType === "hysteria2" && (
+              <div className="space-y-3 border border-pink-100 dark:border-pink-900/40 p-3.5 rounded-lg bg-pink-50/20 dark:bg-pink-950/20">
+                <Flex justify="between" align="center">
+                  <Text size="2" weight="bold" color="pink">
+                    Hysteria 2 核心参数
+                  </Text>
+                  <Badge color="pink" variant="soft">UDP 加速</Badge>
+                </Flex>
+
+                <div>
+                  <Text as="label" size="2" weight="medium" className="block mb-1">
+                    访问密码 (Password) *
+                  </Text>
+                  <TextField.Root
+                    placeholder="设置连接密码"
+                    value={formPassword}
+                    onChange={(e) => setFormPassword(e.target.value)}
+                  />
+                </div>
+
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <Text as="label" size="2" weight="medium">
+                      Salamander 混淆密码 (抗运营商 UDP QoS 限速)
+                    </Text>
+                    <Button
+                      size="1"
+                      variant="ghost"
+                      type="button"
+                      onClick={() => {
+                        const rand = Math.random().toString(36).substring(2, 12);
+                        setFormObfsPassword(rand);
+                      }}
+                    >
+                      🎲 随机生成
+                    </Button>
+                  </div>
+                  <TextField.Root
+                    placeholder="输入混淆密码（建议配置，可有效突破晚高峰 UDP 限速）"
+                    value={formObfsPassword}
+                    onChange={(e) => setFormObfsPassword(e.target.value)}
+                  />
+                </div>
+              </div>
+            )}
+
+            {/* Mode 5: Trojan Specifics */}
+            {formRuleType === "trojan" && (
+              <div className="space-y-3 border border-indigo-100 dark:border-indigo-900/40 p-3.5 rounded-lg bg-indigo-50/20 dark:bg-indigo-950/20">
+                <Text size="2" weight="bold">
+                  Trojan 参数设置
+                </Text>
+                <div>
+                  <Text as="label" size="2" weight="medium" className="block mb-1">
+                    访问密码 *
+                  </Text>
+                  <TextField.Root
+                    placeholder="设置连接密码"
+                    value={formPassword}
+                    onChange={(e) => setFormPassword(e.target.value)}
+                  />
                 </div>
               </div>
             )}

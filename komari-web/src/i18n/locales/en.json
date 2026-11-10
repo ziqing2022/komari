@@ -948,7 +948,9 @@
                    "firewallOpened":  "Firewall Open",
                    "socks5Settings":  "SOCKS5 Settings (Leave blank for no auth)",
                    "modalDescription":  "Configure Sing-box rules supporting port forwarding, VLESS-Reality, SOCKS5, Shadowsocks with automatic firewall management",
-                   "searchPlaceholder":  "Search rule name, SNI, port, target..."
+                   "searchPlaceholder":  "Search rule name, SNI, port, target...",
+                   "udpNoticeTitle":  "Protocol Notice: ",
+                   "udpNoticeDesc":  "TUIC and Hysteria 2 are strictly UDP (QUIC) based protocols. The reverse bridge operates as a TCP multiplexing tunnel and cannot directly carry UDP datagrams. For NAT/intranet nodes requiring reverse transit, VLESS Reality is highly recommended. To use TUIC or Hysteria 2, please select \u0027Direct Local Egress\u0027 on a public server node."
                },
     "page_not_found":  "The server cannot find the specific page you\u0027re trying to access.",
     "ping":  {

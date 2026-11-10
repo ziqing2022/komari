@@ -1715,6 +1715,8 @@
                    "searchPlaceholder":  "Search rule name, SNI, port, target...",
                    "protocols":  {
                                      "forward":  "Port Forwarding"
-                                 }
+                                 },
+                   "udpNoticeTitle":  "Pemberitahuan Protokol: ",
+                   "udpNoticeDesc":  "TUIC dan Hysteria 2 menggunakan protokol UDP (QUIC). Terowongan reverse bridge saat ini menggunakan TCP dan tidak dapat membawa UDP. Gunakan VLESS Reality untuk node NAT."
                }
 }

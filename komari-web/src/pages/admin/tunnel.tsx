@@ -34,6 +34,7 @@ import {
   Check,
   ChevronsUpDown,
   X,
+  AlertTriangle,
 } from "lucide-react";
 import { toast } from "sonner";
 import { NodeDetailsProvider, useNodeDetails, type NodeDetail } from "@/contexts/NodeDetailsContext";
@@ -1350,6 +1351,9 @@ const TunnelContent = () => {
                       if (nextType === "vless" && (!formListenPort || formListenPort === 8080)) {
                         setFormListenPort(443);
                       }
+                      if ((nextType === "tuic" || nextType === "hysteria2") && !editingRule) {
+                        setFormIsReverse(false);
+                      }
                       if (nextType === "vless" || nextType === "tuic" || nextType === "socks5" || nextType === "shadowsocks") {
                         if (!formUUID && !formPassword) {
                           handleGenerateCredentials();
@@ -1412,6 +1416,20 @@ const TunnelContent = () => {
                   </div>
                 </button>
               </div>
+
+              {/* TUIC / Hysteria2 UDP Architecture Alert */}
+              {(formRuleType === "tuic" || formRuleType === "hysteria2") && formIsReverse && (
+                <div className="p-2.5 rounded-md bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 text-xs text-amber-800 dark:text-amber-200 flex items-start gap-2">
+                  <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-amber-600" />
+                  <div>
+                    <strong>{t("tunnel.udpNoticeTitle", "协议提示：")}</strong>
+                    {t(
+                      "tunnel.udpNoticeDesc",
+                      "TUIC 与 Hysteria 2 基于纯 UDP (QUIC) 架构。跨机反代通道为 TCP 隧道，无法直接承载 UDP 流量。若需为无公网的内网小鸡做跨机穿透，推荐使用 VLESS Reality 协议；若使用 TUIC/Hy2，建议选择「本机直连出口」并在公网服务器上运行。"
+                    )}
+                  </div>
+                </div>
+              )}
 
               {/* 展开跨机中转配置 */}
               {formIsReverse && (

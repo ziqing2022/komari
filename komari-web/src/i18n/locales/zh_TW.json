@@ -157,7 +157,9 @@
                    "firewallOpened":  "防火牆已放行",
                    "socks5Settings":  "SOCKS5 認證設定 (留空免密)",
                    "modalDescription":  "配置 Sing-box 運行規則，支援埠號轉發與 VLESS-Reality、SOCKS5、Shadowsocks 等主流協議，自動下發並放行防火牆",
-                   "searchPlaceholder":  "搜尋規則名稱、SNI、埠號、目標..."
+                   "searchPlaceholder":  "搜尋規則名稱、SNI、埠號、目標...",
+                   "udpNoticeTitle":  "協議提示：",
+                   "udpNoticeDesc":  "TUIC 與 Hysteria 2 基於純 UDP (QUIC) 架構。跨機反代通道為 TCP 隧道，無法直接承載 UDP 流量。若需為無公網的內網小雞做跨機穿透，推薦使用 VLESS Reality 協議；若使用 TUIC/Hy2，建議選擇「本機直連出口」並在公網伺服器上執行。"
                },
     "admin":  {
                   "nodeDetail":  {

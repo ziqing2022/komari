@@ -1672,5 +1672,49 @@
                                          "files_title":  "ファイル管理もここにあります",
                                          "title":  "リモートワークベンチを試す"
                                      }
-                   }
+                   },
+    "tunnel":  {
+                   "transitExit":  "Bridge Exit",
+                   "tuicSettings":  "TUIC v5 Settings",
+                   "auth":  "Auth",
+                   "transportProtocol":  "Transport Protocol",
+                   "username":  "Username",
+                   "reverseTargetNote":  "Traffic will be tunneled to 127.0.0.1 on this target port",
+                   "localServiceTargetPort":  "Local Service Target Port",
+                   "tlsFingerprint":  "TLS Fingerprint",
+                   "enableImmediately":  "Enable Immediately upon Save",
+                   "enableImmediatelyDesc":  "Agent will immediately start the Sing-box proxy process",
+                   "trojanSettings":  "Trojan Settings",
+                   "randomGenerate":  "Generate Random",
+                   "accessPassword":  "Password",
+                   "forwardTargetTitle":  "Forward Port Target",
+                   "encryptionMethod":  "Cipher Method",
+                   "noAuth":  "No Auth Required",
+                   "copyLinkTitle":  "Copy client connection link / subscription",
+                   "saveAndApply":  "Save \u0026 Apply",
+                   "password":  "Password",
+                   "deleteConfirmDesc":  "Are you sure you want to delete this rule? Agent will release the port and clean firewall rules.",
+                   "hysteria2Settings":  "Hysteria 2 Obfuscation",
+                   "copyLink":  "Copy Link",
+                   "unifiedRuleNote":  "Unified intranet and public rules",
+                   "publicExit":  "Public Exit",
+                   "intranetSource":  "Intranet Source",
+                   "firewallClosed":  "Firewall Unset",
+                   "confirmDelete":  "Confirm Delete",
+                   "directForwardNote":  "Forwards incoming traffic directly to local service port (127.0.0.1).",
+                   "allProtocols":  "All Protocols",
+                   "enabledCount":  "Active {{count}}",
+                   "shadowsocksSettings":  "Shadowsocks Settings",
+                   "userUUID":  "User UUID",
+                   "masquerade":  "SNI / Masquerade",
+                   "totalCount":  "Total {{count}}",
+                   "reverseTargetTitle":  "Reverse Transit Local Target",
+                   "firewallOpened":  "Firewall Open",
+                   "socks5Settings":  "SOCKS5 Settings (Leave blank for no auth)",
+                   "modalDescription":  "Configure Sing-box rules supporting port forwarding, VLESS-Reality, SOCKS5, Shadowsocks with automatic firewall management",
+                   "searchPlaceholder":  "Search rule name, SNI, port, target...",
+                   "protocols":  {
+                                     "forward":  "ポート転送"
+                                 }
+               }
 }

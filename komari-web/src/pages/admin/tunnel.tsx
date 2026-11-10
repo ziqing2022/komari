@@ -144,33 +144,36 @@ const ServerCombobox = ({
   return (
     <Popover.Root open={open} onOpenChange={setOpen}>
       <Popover.Trigger>
-        <button
+        <Button
           type="button"
+          variant="surface"
+          color="gray"
           disabled={disabled}
-          className={`w-full flex items-center justify-between px-3 py-2 text-sm rounded-md border transition-all text-left ${
-            disabled
-              ? "opacity-50 cursor-not-allowed bg-gray-100 dark:bg-gray-800 border-gray-200 dark:border-gray-700 text-gray-500"
-              : "cursor-pointer bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-800 hover:border-gray-300 dark:hover:border-gray-700 text-gray-900 dark:text-gray-100 shadow-xs focus:outline-hidden focus:ring-2 focus:ring-blue-500/30"
-          }`}
+          className="w-full justify-between font-normal text-left h-9 px-3 cursor-pointer"
         >
-          <span className="flex items-center gap-2 truncate">
+          <span className="flex items-center gap-2 truncate text-sm">
             {value === "custom" ? (
               <Globe className="w-4 h-4 text-purple-500 shrink-0" />
             ) : (
               <Server className="w-4 h-4 text-gray-400 shrink-0" />
             )}
-            <span className={`truncate ${!value ? "text-gray-400" : "font-medium"}`}>
+            <span className={`truncate ${!value ? "text-gray-400" : "text-gray-900 dark:text-gray-100 font-medium"}`}>
               {displayLabel}
             </span>
           </span>
           <ChevronsUpDown className="w-4 h-4 text-gray-400 shrink-0 ml-2" />
-        </button>
+        </Button>
       </Popover.Trigger>
 
       <Popover.Content
         align="start"
         sideOffset={4}
-        className="p-2 w-[var(--radix-popover-trigger-width)] min-w-[320px] max-w-md shadow-xl rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 z-50"
+        style={{
+          width: "var(--radix-popover-trigger-width)",
+          minWidth: "min(320px, calc(100vw - 32px))",
+          maxWidth: "calc(100vw - 32px)",
+        }}
+        className="p-2.5 z-50 shadow-lg"
       >
         <div className="mb-2">
           <TextField.Root
@@ -916,33 +919,33 @@ const TunnelContent = () => {
             </Text>
           </Flex>
           <Text size="2" color="gray" className="mt-1 block">
-            基于 Sing-box 为服务器节点配置端口映射、VLESS-Reality、Socks5、Shadowsocks 及反向代理通道，全自动放行系统防火墙
+            {t("tunnel.description", "基于 Sing-box 为服务器节点配置端口映射、VLESS-Reality、Socks5、Shadowsocks 及反向代理通道，全自动放行系统防火墙")}
           </Text>
         </div>
-        <Flex gap="3" align="center">
-          <Button variant="soft" onClick={loadTunnels} disabled={loading}>
+        <div className="flex items-center gap-2 flex-wrap w-full sm:w-auto mt-2 sm:mt-0">
+          <Button variant="soft" onClick={loadTunnels} disabled={loading} className="shrink-0" title={t("common.refresh", "刷新")}>
             <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
-            {t("common.refresh", "刷新")}
+            <span className="hidden sm:inline">{t("common.refresh", "刷新")}</span>
           </Button>
 
-          <Button color="blue" onClick={() => handleOpenCreate("vless")}>
+          <Button color="blue" onClick={() => handleOpenCreate("vless")} className="flex-1 sm:flex-initial">
             <Sparkles className="w-4 h-4" />
-            + VLESS Reality 节点
+            <span>+ VLESS Reality</span>
           </Button>
 
-          <Button onClick={() => handleOpenCreate("forward")}>
+          <Button onClick={() => handleOpenCreate("forward")} className="flex-1 sm:flex-initial">
             <Plus className="w-4 h-4" />
-            {t("tunnel.createTunnel", "新建规则")}
+            <span>{t("tunnel.createTunnel", "新建规则")}</span>
           </Button>
-        </Flex>
+        </div>
       </Flex>
 
       {/* Filter and Search Bar */}
       <Card>
-        <Flex gap="4" align="center" className="flex-wrap">
-          <div className="flex-1 min-w-[200px] max-w-sm">
+        <div className="flex flex-col sm:flex-row gap-3 sm:items-center">
+          <div className="w-full sm:flex-1 sm:max-w-xs">
             <TextField.Root
-              placeholder="搜索规则名称、SNI、端口、目标..."
+              placeholder={t("tunnel.searchPlaceholder", "搜索规则名称、SNI、端口、目标...")}
               value={searchKeyword}
               onChange={(e) => setSearchKeyword(e.target.value)}
             >
@@ -952,48 +955,51 @@ const TunnelContent = () => {
             </TextField.Root>
           </div>
 
-          <div className="min-w-[170px]">
-            <Select.Root
-              value={selectedServerFilter}
-              onValueChange={setSelectedServerFilter}
-            >
-              <Select.Trigger className="w-full" placeholder={t("tunnel.filterByServer", "按节点筛选")} />
-              <Select.Content>
-                <Select.Item value="all">{t("tunnel.allServers", "全部节点")}</Select.Item>
-                {nodeDetail &&
-                  nodeDetail.map((node) => (
-                    <Select.Item key={node.uuid} value={node.uuid}>
-                      {node.name || node.uuid}
-                    </Select.Item>
-                  ))}
-              </Select.Content>
-            </Select.Root>
+          <div className="grid grid-cols-2 gap-2 w-full sm:w-auto sm:flex sm:items-center">
+            <div className="w-full sm:w-44">
+              <Select.Root
+                value={selectedServerFilter}
+                onValueChange={setSelectedServerFilter}
+              >
+                <Select.Trigger className="w-full" placeholder={t("tunnel.filterByServer", "按节点筛选")} />
+                <Select.Content>
+                  <Select.Item value="all">{t("tunnel.allServers", "全部节点")}</Select.Item>
+                  {nodeDetail &&
+                    nodeDetail.map((node) => (
+                      <Select.Item key={node.uuid} value={node.uuid}>
+                        {node.name || node.uuid}
+                      </Select.Item>
+                    ))}
+                </Select.Content>
+              </Select.Root>
+            </div>
+
+            <div className="w-full sm:w-36">
+              <Select.Root
+                value={selectedTypeFilter}
+                onValueChange={setSelectedTypeFilter}
+              >
+                <Select.Trigger className="w-full" placeholder={t("tunnel.allProtocols", "全部协议")} />
+                <Select.Content>
+                  <Select.Item value="all">{t("tunnel.allProtocols", "全部协议")}</Select.Item>
+                  <Select.Item value="forward">{t("tunnel.protocols.forward", "端口转发")}</Select.Item>
+                  <Select.Item value="vless">VLESS Reality</Select.Item>
+                  <Select.Item value="tuic">TUIC v5</Select.Item>
+                  <Select.Item value="hysteria2">Hysteria 2</Select.Item>
+                  <Select.Item value="socks5">SOCKS5</Select.Item>
+                  <Select.Item value="shadowsocks">Shadowsocks</Select.Item>
+                  <Select.Item value="trojan">Trojan</Select.Item>
+                </Select.Content>
+              </Select.Root>
+            </div>
           </div>
 
-          <div className="min-w-[150px]">
-            <Select.Root
-              value={selectedTypeFilter}
-              onValueChange={setSelectedTypeFilter}
-            >
-              <Select.Trigger className="w-full" placeholder="按协议类型筛选" />
-              <Select.Content>
-                <Select.Item value="all">全部协议</Select.Item>
-                <Select.Item value="forward">端口转发 (Direct)</Select.Item>
-                <Select.Item value="vless">VLESS + REALITY</Select.Item>
-                <Select.Item value="socks5">SOCKS5 代理</Select.Item>
-                <Select.Item value="shadowsocks">Shadowsocks</Select.Item>
-                <Select.Item value="trojan">Trojan</Select.Item>
-                <Select.Item value="hysteria2">Hysteria 2</Select.Item>
-              </Select.Content>
-            </Select.Root>
-          </div>
-
-          <Flex gap="2" align="center" className="ml-auto text-sm text-gray-500">
-            <span>共 {tunnels.length} 条</span>
+          <div className="flex items-center justify-between sm:justify-end gap-2 text-xs sm:text-sm text-gray-500 sm:ml-auto pt-1 sm:pt-0 border-t border-gray-100 dark:border-gray-800 sm:border-t-0">
+            <span>{t("tunnel.totalCount", "共 {{count}} 条", { count: tunnels.length })}</span>
             <span>·</span>
-            <span>已启用 {tunnels.filter((r) => r.enabled).length} 条</span>
-          </Flex>
-        </Flex>
+            <span>{t("tunnel.enabledCount", "已启用 {{count}} 条", { count: tunnels.filter((r) => r.enabled).length })}</span>
+          </div>
+        </div>
       </Card>
 
       {/* Content Area */}
@@ -1076,32 +1082,32 @@ const TunnelContent = () => {
                       {rule.is_reverse && ruleType !== "forward" && (
                         <Badge color="cyan" variant="soft" className="flex items-center gap-1 font-mono">
                           <Radio className="w-3 h-3 text-cyan-600" />
-                          <span>跨机出口: {rule.bridge_host}:{rule.bridge_port || rule.listen_port}</span>
+                          <span>{t("tunnel.transitExit", "跨机出口")}: {rule.bridge_host}:{rule.bridge_port || rule.listen_port}</span>
                         </Badge>
                       )}
                       {ruleType === "forward" && (
                         rule.is_reverse ? (
                           <Badge color="blue" variant="solid" className="flex items-center gap-1">
                             <Sparkles className="w-3 h-3" />
-                            跨机反向穿透 (NAT Traversal)
+                            {t("tunnel.transitTag", "跨机反向穿透")}
                           </Badge>
                         ) : (
                           <Badge color="gray" variant="outline">
-                            端口转发 ({rule.protocol.toUpperCase()})
+                            {t("tunnel.protocol", "端口转发")} · {rule.protocol.toUpperCase()}
                           </Badge>
                         )
                       )}
 
                       {/* Firewall allowance */}
                       {rule.auto_open_firewall ? (
-                        <Badge color="green" variant="soft" className="flex items-center gap-1" title="系统防火墙自动放行">
+                        <Badge color="green" variant="soft" className="flex items-center gap-1" title={t("tunnel.firewallOpened", "防火墙已放行")}>
                           <ShieldCheck className="w-3 h-3 text-green-600" />
-                          <span>防火墙已放行</span>
+                          <span>{t("tunnel.firewallOpened", "防火墙已放行")}</span>
                         </Badge>
                       ) : (
-                        <Badge color="gray" variant="soft" className="flex items-center gap-1" title="未自动放行防火墙">
+                        <Badge color="gray" variant="soft" className="flex items-center gap-1" title={t("tunnel.firewallClosed", "防火墙未配置")}>
                           <ShieldAlert className="w-3 h-3 text-gray-400" />
-                          <span>防火墙未配置</span>
+                          <span>{t("tunnel.firewallClosed", "防火墙未配置")}</span>
                         </Badge>
                       )}
                     </Flex>
@@ -1113,13 +1119,13 @@ const TunnelContent = () => {
                           <Flex align="center" gap="3" wrap="wrap">
                             <div className="flex items-center gap-1.5 font-mono text-purple-700 dark:text-purple-300 font-bold">
                               <Server className="w-4 h-4 text-purple-600" />
-                              <span>内网源 127.0.0.1:{rule.target_port || rule.listen_port}</span>
+                              <span>{t("tunnel.intranetSource", "内网源")} 127.0.0.1:{rule.target_port || rule.listen_port}</span>
                             </div>
                             <ArrowRight className="w-4 h-4 text-blue-500 font-bold" />
                             <div className="flex items-center gap-2">
                               <Badge color="blue" variant="soft" className="flex items-center gap-1">
                                 <Globe className="w-3 h-3" />
-                                <span>公网出口</span>
+                                <span>{t("tunnel.publicExit", "公网出口")}</span>
                               </Badge>
                               <span className="font-mono text-blue-700 dark:text-blue-300 font-bold">
                                 {rule.bridge_host || (rule.bridge_client_uuid && serverMap.get(rule.bridge_client_uuid)?.ipv4) || "公网端"}:{rule.bridge_port || rule.listen_port}
@@ -1161,7 +1167,7 @@ const TunnelContent = () => {
                           {ruleType === "vless" && (
                             <>
                               <div>
-                                <span className="text-gray-400">SNI / 伪装: </span>
+                                <span className="text-gray-400">SNI / {t("tunnel.masquerade", "伪装")}: </span>
                                 <span className="font-mono font-medium text-purple-600 dark:text-purple-400">
                                   {rule.sni || "gateway.icloud.com"}
                                 </span>
@@ -1179,14 +1185,14 @@ const TunnelContent = () => {
 
                           {ruleType === "socks5" && (
                             <div>
-                              <span className="text-gray-400">认证: </span>
-                              <span>{rule.password ? `用户: ${rule.username || "komari"}` : "无密码认证"}</span>
+                              <span className="text-gray-400">{t("tunnel.auth", "认证")}: </span>
+                              <span>{rule.password ? `用户: ${rule.username || "komari"}` : t("tunnel.noAuth", "无密码认证")}</span>
                             </div>
                           )}
 
                           {ruleType === "shadowsocks" && (
                             <div>
-                              <span className="text-gray-400">加密算法: </span>
+                              <span className="text-gray-400">{t("tunnel.encryptionMethod", "加密算法")}: </span>
                               <span className="font-mono">{rule.method || "2022-blake3-aes-128-gcm"}</span>
                             </div>
                           )}
@@ -1216,7 +1222,7 @@ const TunnelContent = () => {
                               </div>
                               {rule.obfs_password && (
                                 <div>
-                                  <span className="text-gray-400">Salamander 混淆: </span>
+                                  <span className="text-gray-400">Salamander {t("tunnel.obfsPassword", "混淆密码")}: </span>
                                   <span className="font-mono text-pink-600 font-bold">{rule.obfs_password}</span>
                                 </div>
                               )}
@@ -1225,7 +1231,7 @@ const TunnelContent = () => {
 
                           {ruleType === "trojan" && (
                             <div>
-                              <span className="text-gray-400">伪装域名 (SNI): </span>
+                              <span className="text-gray-400">SNI / {t("tunnel.masquerade", "伪装")}: </span>
                               <span className="font-mono">{rule.sni || "gateway.icloud.com"}</span>
                             </div>
                           )}
@@ -1234,21 +1240,9 @@ const TunnelContent = () => {
                     </div>
                   </div>
 
-                  {/* Right Column: Status & Controls */}
-                  <Flex align="center" gap="3" className="shrink-0 self-end md:self-center">
-                    {/* Copy Link Button */}
-                    <Button
-                      size="2"
-                      variant="soft"
-                      color="blue"
-                      onClick={() => handleCopyShareLink(rule)}
-                      title="复制客户端连接链接 / 订阅"
-                    >
-                      <Copy className="w-3.5 h-3.5 mr-1" />
-                      复制链接
-                    </Button>
-
-                    <Flex align="center" gap="2">
+                  {/* Bottom / Right Column: Status & Controls */}
+                  <div className="flex items-center justify-between md:justify-end gap-2 sm:gap-3 w-full md:w-auto pt-2.5 md:pt-0 border-t border-gray-100 dark:border-gray-800 md:border-t-0 shrink-0">
+                    <div className="flex items-center gap-2">
                       <Switch
                         checked={rule.enabled}
                         onCheckedChange={() => handleToggleStatus(rule)}
@@ -1257,28 +1251,42 @@ const TunnelContent = () => {
                       <Text size="2" weight="medium" color={rule.enabled ? "green" : "gray"}>
                         {rule.enabled ? t("tunnel.status.active", "生效中") : t("tunnel.status.paused", "已暂停")}
                       </Text>
-                    </Flex>
+                    </div>
 
-                    <IconButton
-                      size="2"
-                      variant="soft"
-                      color="gray"
-                      onClick={() => handleOpenEdit(rule)}
-                      title={t("tunnel.editTunnel", "编辑规则")}
-                    >
-                      <Pencil className="w-4 h-4" />
-                    </IconButton>
+                    <div className="flex items-center gap-1.5 sm:gap-2">
+                      <Button
+                        size="1"
+                        variant="soft"
+                        color="blue"
+                        onClick={() => handleCopyShareLink(rule)}
+                        title={t("tunnel.copyLinkTitle", "复制客户端连接链接 / 订阅")}
+                        className="text-xs sm:text-sm"
+                      >
+                        <Copy className="w-3.5 h-3.5 mr-1" />
+                        {t("tunnel.copyLink", "复制链接")}
+                      </Button>
 
-                    <IconButton
-                      size="2"
-                      variant="soft"
-                      color="red"
-                      onClick={() => handleOpenDelete(rule)}
-                      title={t("tunnel.deleteTunnel", "删除规则")}
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </IconButton>
-                  </Flex>
+                      <IconButton
+                        size="1"
+                        variant="soft"
+                        color="gray"
+                        onClick={() => handleOpenEdit(rule)}
+                        title={t("tunnel.editTunnel", "编辑规则")}
+                      >
+                        <Pencil className="w-3.5 h-3.5" />
+                      </IconButton>
+
+                      <IconButton
+                        size="1"
+                        variant="soft"
+                        color="red"
+                        onClick={() => handleOpenDelete(rule)}
+                        title={t("tunnel.deleteTunnel", "删除规则")}
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </IconButton>
+                    </div>
+                  </div>
                 </div>
               </Card>
             );
@@ -1288,15 +1296,22 @@ const TunnelContent = () => {
 
       {/* Create / Edit Dialog */}
       <Dialog.Root open={editDialogOpen} onOpenChange={setEditDialogOpen}>
-        <Dialog.Content style={{ maxWidth: 580 }}>
+        <Dialog.Content
+          style={{
+            maxWidth: "min(580px, calc(100vw - 20px))",
+            width: "calc(100vw - 20px)",
+            margin: "0 auto",
+          }}
+          className="p-4 sm:p-6 overflow-hidden"
+        >
           <Dialog.Title>
             {editingRule ? t("tunnel.editTunnel", "编辑规则") : t("tunnel.createTunnel", "新建隧道或代理节点")}
           </Dialog.Title>
           <Dialog.Description size="2" color="gray" className="mb-4">
-            配置 Sing-box 运行规则，支持端口转发与 VLESS-Reality、SOCKS5、Shadowsocks 等主流协议，自动下发并放行防火墙
+            {t("tunnel.modalDescription", "配置 Sing-box 运行规则，支持端口转发与 VLESS-Reality、SOCKS5、Shadowsocks 等主流协议，自动下发并放行防火墙")}
           </Dialog.Description>
 
-          <div className="space-y-4 max-h-[75vh] overflow-y-auto pr-1">
+          <div className="space-y-4 max-h-[75vh] overflow-y-auto overflow-x-hidden pr-1">
             {/* Server Node Selection */}
             <div>
               <Text as="label" size="2" weight="bold" className="block mb-1">
@@ -1316,9 +1331,9 @@ const TunnelContent = () => {
               <Text as="label" size="2" weight="bold" className="block mb-1">
                 {t("tunnel.protocolType", "功能与协议类型")} *
               </Text>
-              <div className="grid grid-cols-4 gap-2">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 sm:gap-2">
                 {[
-                  { id: "forward", label: "端口转发", icon: Radio },
+                  { id: "forward", label: t("tunnel.protocols.forward", "端口转发"), icon: Radio },
                   { id: "vless", label: "VLESS Reality", icon: Sparkles },
                   { id: "tuic", label: "TUIC v5", icon: Zap },
                   { id: "hysteria2", label: "Hysteria 2", icon: Zap },
@@ -1341,14 +1356,14 @@ const TunnelContent = () => {
                         }
                       }
                     }}
-                    className={`flex items-center justify-center gap-1 p-2 rounded-lg border text-xs font-semibold transition-all ${
+                    className={`flex items-center justify-center gap-1.5 p-2 rounded-lg border text-xs font-semibold transition-all ${
                       formRuleType === item.id
                         ? "border-blue-500 bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300 dark:border-blue-600 shadow-sm"
                         : "border-gray-200 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-300"
                     }`}
                   >
                     <item.icon className="w-3.5 h-3.5 shrink-0" />
-                    <span>{item.label}</span>
+                    <span className="truncate">{item.label}</span>
                   </button>
                 ))}
               </div>
@@ -1360,9 +1375,9 @@ const TunnelContent = () => {
                 <Text as="label" size="2" weight="bold" className="text-blue-950 dark:text-blue-200">
                   {t("tunnel.networkExitType", "网络出口类型")} *
                 </Text>
-                <span className="text-[11px] text-gray-500">统一内网与公网规则</span>
+                <span className="text-[11px] text-gray-500">{t("tunnel.unifiedRuleNote", "统一内网与公网规则")}</span>
               </div>
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 <button
                   type="button"
                   onClick={() => setFormIsReverse(false)}
@@ -1426,7 +1441,7 @@ const TunnelContent = () => {
                     />
                   </div>
 
-                  <div className="grid grid-cols-2 gap-2">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                     <div>
                       <span className="text-xs font-semibold text-gray-700 dark:text-gray-300 block mb-1">
                         {t("tunnel.bridgeHost", "中转机公网地址")} *
@@ -1459,14 +1474,14 @@ const TunnelContent = () => {
                 {t("tunnel.ruleName", "规则名称")} *
               </Text>
               <TextField.Root
-                placeholder="例如：新加坡 VLESS Reality / 内网 Web 穿透"
+                placeholder={t("tunnel.ruleNamePlaceholder", "例如：新加坡 VLESS Reality / 内网 Web 穿透")}
                 value={formName}
                 onChange={(e) => setFormName(e.target.value)}
               />
             </div>
 
             {/* Listen Port */}
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 sm:gap-3">
               <div>
                 <Text as="label" size="2" weight="bold" className="block mb-1">
                   {t("tunnel.listenPort", "监听端口")} *
@@ -1488,7 +1503,7 @@ const TunnelContent = () => {
               {formRuleType === "forward" && (
                 <div>
                   <Text as="label" size="2" weight="bold" className="block mb-1">
-                    传输协议
+                    {t("tunnel.transportProtocol", "传输协议")}
                   </Text>
                   <Select.Root
                     value={formProtocol}
@@ -1505,19 +1520,19 @@ const TunnelContent = () => {
               )}
 
               {formRuleType !== "forward" && (
-                <Flex align="end">
+                <div className="flex items-end">
                   <Button
                     type="button"
                     variant="soft"
                     color="purple"
-                    className="w-full"
+                    className="w-full h-9"
                     onClick={handleGenerateCredentials}
                     disabled={generatingKeys}
                   >
                     <Sparkles className={`w-3.5 h-3.5 mr-1 ${generatingKeys ? "animate-spin" : ""}`} />
-                    🎲 {t("tunnel.generateCredentials", "一键生成凭据密钥")}
+                    <span className="truncate">🎲 {t("tunnel.generateCredentials", "一键生成凭据密钥")}</span>
                   </Button>
-                </Flex>
+                </div>
               )}
             </div>
 
@@ -1525,13 +1540,15 @@ const TunnelContent = () => {
             {formRuleType === "forward" && (
               <div className="space-y-3 border border-gray-100 dark:border-gray-800 p-3 rounded-lg bg-gray-50/50 dark:bg-gray-800/30">
                 <Text size="2" weight="bold">
-                  {formIsReverse ? "内网反向穿透本地服务目标" : "正向端口转发目标"}
+                  {formIsReverse
+                    ? t("tunnel.reverseTargetTitle", "内网反向穿透本地服务目标")
+                    : t("tunnel.forwardTargetTitle", "正向端口转发目标")}
                 </Text>
 
                 {formIsReverse ? (
                   <div>
                     <Text as="label" size="2" weight="bold" className="block mb-1">
-                      内网本地服务目标端口 *
+                      {t("tunnel.localServiceTargetPort", "内网本地服务目标端口")} *
                     </Text>
                     <TextField.Root
                       type="number"
@@ -1540,7 +1557,7 @@ const TunnelContent = () => {
                       onChange={(e) => setFormTargetPort(e.target.value === "" ? "" : Number(e.target.value))}
                     />
                     <Text size="1" color="gray" className="block mt-1">
-                      数据穿透后将送达当前内网节点的 127.0.0.1 目标端口
+                      {t("tunnel.reverseTargetNote", "数据穿透后将送达当前内网节点的 127.0.0.1 目标端口")}
                     </Text>
                   </div>
                 ) : (
@@ -1598,7 +1615,7 @@ const TunnelContent = () => {
                       </div>
                     ) : (
                       <Text size="1" color="gray" className="block pt-1">
-                        将请求直接转发至该小鸡节点本机的指定端口 (127.0.0.1)。
+                        {t("tunnel.directForwardNote", "将请求直接转发至该小鸡节点本机的指定端口 (127.0.0.1)。")}
                       </Text>
                     )}
 
@@ -1637,10 +1654,10 @@ const TunnelContent = () => {
                   </Button>
                 </div>
 
-                <div className="flex gap-2">
+                <div className="flex flex-col sm:flex-row gap-2">
                   <div className="flex-1">
                     <TextField.Root
-                      placeholder="例如：gateway.icloud.com"
+                      placeholder={t("tunnel.sniPlaceholder", "例如：gateway.icloud.com")}
                       value={formSNI}
                       onChange={(e) => {
                         setFormSNI(e.target.value);
@@ -1648,25 +1665,27 @@ const TunnelContent = () => {
                       }}
                     />
                   </div>
-                  <Select.Root
-                    value=""
-                    onValueChange={(val) => {
-                      if (val) {
-                        setFormSNI(val);
-                        setSniProbeResult(null);
-                        handleProbeSNI(val);
-                      }
-                    }}
-                  >
-                    <Select.Trigger placeholder={t("tunnel.sniCandidates", "优质冷门 SNI 库")} />
-                    <Select.Content>
-                      {CURATED_SNIS.map((s) => (
-                        <Select.Item key={s.domain} value={s.domain}>
-                          {s.name} ({s.domain})
-                        </Select.Item>
-                      ))}
-                    </Select.Content>
-                  </Select.Root>
+                  <div className="w-full sm:w-44 shrink-0">
+                    <Select.Root
+                      value=""
+                      onValueChange={(val) => {
+                        if (val) {
+                          setFormSNI(val);
+                          setSniProbeResult(null);
+                          handleProbeSNI(val);
+                        }
+                      }}
+                    >
+                      <Select.Trigger className="w-full" placeholder={t("tunnel.sniCandidates", "优质冷门 SNI 库")} />
+                      <Select.Content>
+                        {CURATED_SNIS.map((s) => (
+                          <Select.Item key={s.domain} value={s.domain}>
+                            {s.name} ({s.domain})
+                          </Select.Item>
+                        ))}
+                      </Select.Content>
+                    </Select.Root>
+                  </div>
                 </div>
 
                 {sniProbeResult && (
@@ -1697,7 +1716,7 @@ const TunnelContent = () => {
 
                 <div>
                   <Text as="label" size="2" weight="medium" className="block mb-1">
-                    用户 UUID *
+                    {t("tunnel.userUUID", "用户 UUID")} *
                   </Text>
                   <TextField.Root
                     placeholder="b831381d-6324-4d53-ad4f-8cda48b30811"
@@ -1706,7 +1725,7 @@ const TunnelContent = () => {
                   />
                 </div>
 
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 sm:gap-3">
                   <div>
                     <Text as="label" size="2" weight="medium" className="block mb-1">
                       {t("tunnel.privateKey", "REALITY 私钥")} *
@@ -1743,13 +1762,13 @@ const TunnelContent = () => {
 
                 <div>
                   <Text as="label" size="2" weight="medium" className="block mb-1">
-                    TLS 伪装指纹
+                    {t("tunnel.tlsFingerprint", "TLS 伪装指纹")}
                   </Text>
                   <Select.Root value={formFingerprint} onValueChange={(val) => setFormFingerprint(val)}>
                     <Select.Trigger className="w-full" />
                     <Select.Content>
-                      <Select.Item value="ios">ios (推荐，完美匹配 Apple/iCloud 伪装，避免握手重置)</Select.Item>
-                      <Select.Item value="edge">edge (推荐，微软 Edge 浏览器指纹)</Select.Item>
+                      <Select.Item value="ios">ios (推荐，完美匹配 Apple/iCloud 伪装)</Select.Item>
+                      <Select.Item value="edge">edge (微软 Edge 浏览器指纹)</Select.Item>
                       <Select.Item value="chrome">chrome (标准 Google Chrome 指纹)</Select.Item>
                       <Select.Item value="random">random (随机浏览器指纹)</Select.Item>
                       <Select.Item value="safari">safari (苹果 Safari 指纹)</Select.Item>
@@ -1765,14 +1784,14 @@ const TunnelContent = () => {
               <div className="space-y-3 border border-teal-100 dark:border-teal-900/40 p-3.5 rounded-lg bg-teal-50/20 dark:bg-teal-950/20">
                 <Flex justify="between" align="center">
                   <Text size="2" weight="bold" color="teal">
-                    TUIC v5 核心参数
+                    {t("tunnel.tuicSettings", "TUIC v5 核心参数")}
                   </Text>
                   <Badge color="teal" variant="soft">0-RTT · BBR</Badge>
                 </Flex>
 
                 <div>
                   <Text as="label" size="2" weight="medium" className="block mb-1">
-                    用户 UUID *
+                    {t("tunnel.userUUID", "用户 UUID")} *
                   </Text>
                   <TextField.Root
                     placeholder="用户 UUID"
@@ -1783,7 +1802,7 @@ const TunnelContent = () => {
 
                 <div>
                   <Text as="label" size="2" weight="medium" className="block mb-1">
-                    访问密码 *
+                    {t("tunnel.accessPassword", "访问密码")} *
                   </Text>
                   <TextField.Root
                     placeholder="连接认证密码"
@@ -1803,14 +1822,14 @@ const TunnelContent = () => {
               <div className="space-y-3 border border-pink-100 dark:border-pink-900/40 p-3.5 rounded-lg bg-pink-50/20 dark:bg-pink-950/20">
                 <Flex justify="between" align="center">
                   <Text size="2" weight="bold" color="pink">
-                    {t("tunnel.obfsSettings", "Hysteria 2 混淆配置")}
+                    {t("tunnel.hysteria2Settings", "Hysteria 2 混淆配置")}
                   </Text>
                   <Badge color="pink" variant="soft">UDP 加速</Badge>
                 </Flex>
 
                 <div>
                   <Text as="label" size="2" weight="medium" className="block mb-1">
-                    访问密码 *
+                    {t("tunnel.accessPassword", "访问密码")} *
                   </Text>
                   <TextField.Root
                     placeholder="设置连接密码"
@@ -1822,7 +1841,7 @@ const TunnelContent = () => {
                 <div>
                   <div className="flex items-center justify-between mb-1">
                     <Text as="label" size="2" weight="medium">
-                      Salamander 混淆密码
+                      {t("tunnel.obfsPassword", "Salamander 混淆密码")}
                     </Text>
                     <Button
                       size="1"
@@ -1833,7 +1852,7 @@ const TunnelContent = () => {
                         setFormObfsPassword(rand);
                       }}
                     >
-                      🎲 随机生成
+                      🎲 {t("tunnel.randomGenerate", "随机生成")}
                     </Button>
                   </div>
                   <TextField.Root
@@ -1849,11 +1868,11 @@ const TunnelContent = () => {
             {formRuleType === "trojan" && (
               <div className="space-y-3 border border-indigo-100 dark:border-indigo-900/40 p-3.5 rounded-lg bg-indigo-50/20 dark:bg-indigo-950/20">
                 <Text size="2" weight="bold">
-                  Trojan 参数设置
+                  {t("tunnel.trojanSettings", "Trojan 参数设置")}
                 </Text>
                 <div>
                   <Text as="label" size="2" weight="medium" className="block mb-1">
-                    访问密码 *
+                    {t("tunnel.accessPassword", "访问密码")} *
                   </Text>
                   <TextField.Root
                     placeholder="设置连接密码"
@@ -1864,16 +1883,16 @@ const TunnelContent = () => {
               </div>
             )}
 
-            {/* Mode 3: SOCKS5 Specifics */}
+            {/* Mode 6: SOCKS5 Specifics */}
             {formRuleType === "socks5" && (
               <div className="space-y-3 border border-gray-100 dark:border-gray-800 p-3 rounded-lg bg-gray-50/50 dark:bg-gray-800/30">
                 <Text size="2" weight="bold">
-                  SOCKS5 认证设置 (留空免密)
+                  {t("tunnel.socks5Settings", "SOCKS5 认证设置 (留空免密)")}
                 </Text>
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 sm:gap-3">
                   <div>
                     <Text as="label" size="2" weight="medium" className="block mb-1">
-                      用户名
+                      {t("tunnel.username", "用户名")}
                     </Text>
                     <TextField.Root
                       placeholder="默认: komari"
@@ -1883,7 +1902,7 @@ const TunnelContent = () => {
                   </div>
                   <div>
                     <Text as="label" size="2" weight="medium" className="block mb-1">
-                      密码
+                      {t("tunnel.password", "密码")}
                     </Text>
                     <TextField.Root
                       placeholder="设置密码"
@@ -1895,15 +1914,15 @@ const TunnelContent = () => {
               </div>
             )}
 
-            {/* Mode 4: Shadowsocks Specifics */}
+            {/* Mode 7: Shadowsocks Specifics */}
             {formRuleType === "shadowsocks" && (
               <div className="space-y-3 border border-gray-100 dark:border-gray-800 p-3 rounded-lg bg-gray-50/50 dark:bg-gray-800/30">
                 <Text size="2" weight="bold">
-                  Shadowsocks 设置
+                  {t("tunnel.shadowsocksSettings", "Shadowsocks 设置")}
                 </Text>
                 <div>
                   <Text as="label" size="2" weight="medium" className="block mb-1">
-                    加密方法
+                    {t("tunnel.encryptionMethod", "加密方法")}
                   </Text>
                   <Select.Root
                     value={formMethod}
@@ -1922,41 +1941,12 @@ const TunnelContent = () => {
                 </div>
                 <div>
                   <Text as="label" size="2" weight="medium" className="block mb-1">
-                    密码 *
+                    {t("tunnel.password", "密码")} *
                   </Text>
                   <TextField.Root
                     placeholder="输入或生成密码"
                     value={formPassword}
                     onChange={(e) => setFormPassword(e.target.value)}
-                  />
-                </div>
-              </div>
-            )}
-
-            {/* Mode 5: Trojan / Hysteria2 Specifics */}
-            {(formRuleType === "trojan" || formRuleType === "hysteria2") && (
-              <div className="space-y-3 border border-gray-100 dark:border-gray-800 p-3 rounded-lg bg-gray-50/50 dark:bg-gray-800/30">
-                <Text size="2" weight="bold">
-                  {formRuleType.toUpperCase()} 参数设置
-                </Text>
-                <div>
-                  <Text as="label" size="2" weight="medium" className="block mb-1">
-                    访问密码 *
-                  </Text>
-                  <TextField.Root
-                    placeholder="设置连接密码"
-                    value={formPassword}
-                    onChange={(e) => setFormPassword(e.target.value)}
-                  />
-                </div>
-                <div>
-                  <Text as="label" size="2" weight="medium" className="block mb-1">
-                    {t("tunnel.sni", "伪装域名")}
-                  </Text>
-                  <TextField.Root
-                    placeholder="例如：gateway.icloud.com"
-                    value={formSNI}
-                    onChange={(e) => setFormSNI(e.target.value)}
                   />
                 </div>
               </div>
@@ -1970,7 +1960,7 @@ const TunnelContent = () => {
                     {t("tunnel.autoOpenFirewall", "自动放行系统防火墙端口")}
                   </Text>
                   <Text size="1" color="gray" className="block">
-                    Agent 会自动在系统防火墙（UFW/Firewalld/Iptables/Netsh）放行该端口
+                    {t("tunnel.autoOpenFirewallDesc", "Agent 会自动在系统防火墙（UFW/Firewalld/Iptables/Netsh）放行该端口")}
                   </Text>
                 </div>
                 <Switch
@@ -1983,10 +1973,10 @@ const TunnelContent = () => {
               <Flex justify="between" align="center">
                 <div>
                   <Text size="2" weight="bold">
-                    {t("tunnel.enable", "保存后立即启用")}
+                    {t("tunnel.enableImmediately", "保存后立即启用")}
                   </Text>
                   <Text size="1" color="gray" className="block">
-                    开启后 Agent 立即下载并启动 Sing-box 代理进程
+                    {t("tunnel.enableImmediatelyDesc", "开启后 Agent 立即下载并启动 Sing-box 代理进程")}
                   </Text>
                 </div>
                 <Switch
@@ -2020,7 +2010,7 @@ const TunnelContent = () => {
             </Button>
             <Button onClick={handleSaveRule} disabled={saving}>
               {saving && <RefreshCw className="w-4 h-4 mr-1 animate-spin" />}
-              {t("common.save", "保存并下发")}
+              {t("tunnel.saveAndApply", "保存并下发")}
             </Button>
           </Flex>
         </Dialog.Content>
@@ -2028,12 +2018,19 @@ const TunnelContent = () => {
 
       {/* Delete Confirmation Dialog */}
       <Dialog.Root open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
-        <Dialog.Content style={{ maxWidth: 450 }}>
+        <Dialog.Content
+          style={{
+            maxWidth: "min(450px, calc(100vw - 20px))",
+            width: "calc(100vw - 20px)",
+            margin: "0 auto",
+          }}
+          className="p-4 sm:p-6"
+        >
           <Dialog.Title color="red">
             {t("tunnel.deleteTunnel", "删除规则")}
           </Dialog.Title>
           <Dialog.Description size="2" color="gray" className="mb-4">
-            确定要删除该规则吗？Agent 将自动释放监听端口并关闭防火墙放行规则。
+            {t("tunnel.deleteConfirmDesc", "确定要删除该规则吗？Agent 将自动释放监听端口并关闭防火墙放行规则。")}
           </Dialog.Description>
 
           {ruleToDelete && (
@@ -2067,7 +2064,7 @@ const TunnelContent = () => {
             </Button>
             <Button color="red" onClick={handleConfirmDelete} disabled={deleting}>
               {deleting && <RefreshCw className="w-4 h-4 mr-1 animate-spin" />}
-              {t("common.confirm", "确定删除")}
+              {t("tunnel.confirmDelete", "确定删除")}
             </Button>
           </Flex>
         </Dialog.Content>

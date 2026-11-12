@@ -848,11 +848,11 @@ const TunnelContent = () => {
       shareLink = `vless://${rule.uuid}@${targetHost}:${targetPort}?encryption=none&flow=xtls-rprx-vision&security=reality&sni=${sni}&fp=${fp}&pbk=${pbk}&sid=${sid}&type=tcp#${nameTag}`;
     } else if (ruleType === "tuic") {
       const sni = rule.sni || "gateway.icloud.com";
-      shareLink = `tuic://${rule.uuid}:${rule.password}@${targetHost}:${targetPort}?congestion_control=bbr&alpn=h3&sni=${sni}&insecure=1#${nameTag}`;
+      shareLink = `tuic://${rule.uuid}:${rule.password}@${targetHost}:${targetPort}?congestion_control=bbr&alpn=h3&sni=${sni}&udp_relay_mode=native&allow_insecure=1&skip-cert-verify=true&insecure=1#${nameTag}`;
     } else if (ruleType === "hysteria2") {
       const sni = rule.sni || "gateway.icloud.com";
       const obfs = rule.obfs_password ? `&obfs=salamander&obfs-password=${rule.obfs_password}` : "";
-      shareLink = `hysteria2://${rule.password}@${targetHost}:${targetPort}?sni=${sni}&insecure=1${obfs}#${nameTag}`;
+      shareLink = `hysteria2://${rule.password}@${targetHost}:${targetPort}?sni=${sni}&insecure=1&allow_insecure=1&skip-cert-verify=true${obfs}#${nameTag}`;
     } else if (ruleType === "socks5") {
       if (rule.password) {
         shareLink = `socks5://${rule.username || "komari"}:${rule.password}@${targetHost}:${targetPort}#${nameTag}`;

@@ -133,13 +133,13 @@ const ServerCombobox = ({
 
   const displayLabel = useMemo(() => {
     if (value === "custom") {
-      return customLabel;
+      return customLabel || t("tunnel.customBridgeServer", "自定义公网机器");
     }
     if (selectedNode) {
-      return `${selectedNode.name || selectedNode.uuid} (${selectedNode.ipv4 || "无IPv4"})`;
+      return `${selectedNode.name || selectedNode.uuid} (${selectedNode.ipv4 || t("tunnel.noIPv4", "无 IPv4")})`;
     }
-    return placeholder;
-  }, [value, selectedNode, customLabel, placeholder]);
+    return placeholder || t("tunnel.selectServer", "选择服务器节点");
+  }, [value, selectedNode, customLabel, placeholder, t]);
 
   return (
     <Popover.Root open={open} onOpenChange={setOpen}>
@@ -216,7 +216,7 @@ const ServerCombobox = ({
             >
               <div className="flex items-center gap-2 truncate">
                 <Globe className="w-4 h-4 text-purple-500 shrink-0" />
-                <span className="truncate">{customLabel}</span>
+                <span className="truncate">{customLabel || t("tunnel.customBridgeServer", "自定义公网机器")}</span>
               </div>
               {value === "custom" && <Check className="w-4 h-4 text-purple-600 shrink-0" />}
             </div>
@@ -246,7 +246,7 @@ const ServerCombobox = ({
                   <div className="flex flex-col truncate mr-2">
                     <span className="truncate font-medium">{node.name || node.uuid}</span>
                     <span className="text-[11px] text-gray-400 truncate">
-                      {node.ipv4 || node.ipv6 || "无IP"}
+                      {node.ipv4 || node.ipv6 || t("tunnel.noIP", "无 IP")}
                     </span>
                   </div>
                   {isSelected && <Check className="w-4 h-4 text-blue-600 shrink-0" />}
@@ -326,18 +326,21 @@ const TunnelContent = () => {
     error?: string;
   } | null>(null);
 
-  const CURATED_SNIS = [
-    { name: "微软 Teams", domain: "teams.microsoft.com" },
-    { name: "微软 Azure", domain: "azure.microsoft.com" },
-    { name: "必应国际", domain: "www.bing.com" },
-    { name: "苹果官网", domain: "www.apple.com" },
-    { name: "苹果 iCloud", domain: "gateway.icloud.com" },
-    { name: "苹果 CDN", domain: "images.apple.com" },
-    { name: "亚马逊 AWS", domain: "aws.amazon.com" },
-    { name: "Cloudflare", domain: "dash.cloudflare.com" },
-    { name: "英伟达", domain: "www.nvidia.com" },
-    { name: "甲骨文云", domain: "www.oracle.com" },
-  ];
+  const CURATED_SNIS = useMemo(
+    () => [
+      { domain: "teams.microsoft.com" },
+      { domain: "azure.microsoft.com" },
+      { domain: "www.bing.com" },
+      { domain: "www.apple.com" },
+      { domain: "gateway.icloud.com" },
+      { domain: "images.apple.com" },
+      { domain: "aws.amazon.com" },
+      { domain: "dash.cloudflare.com" },
+      { domain: "www.nvidia.com" },
+      { domain: "www.oracle.com" },
+    ],
+    []
+  );
 
   const [form2FaCode, setForm2FaCode] = useState("");
   const [saving, setSaving] = useState(false);
@@ -429,7 +432,7 @@ const TunnelContent = () => {
   }, [nodeDetail]);
 
   // One-click key / credentials generator
-  const handleGenerateCredentials = async () => {
+  const handleGenerateCredentials = async (silent = false) => {
     setGeneratingKeys(true);
     try {
       const res = await fetch("/api/admin/tunnel/generate_keys");
@@ -443,7 +446,9 @@ const TunnelContent = () => {
         if (data.password) setFormPassword(data.password);
         if (data.fingerprint) setFormFingerprint(data.fingerprint);
         if (data.default_sni && !formSNI) setFormSNI(data.default_sni);
-        toast.success("已成功生成随机 UUID、X25519 秘钥对及凭据！");
+        if (!silent) {
+          toast.success(t("tunnel.toastCredentialsGenerated", "已成功生成随机凭据与密钥对"));
+        }
         return;
       }
     } catch (e) {
@@ -470,14 +475,16 @@ const TunnelContent = () => {
     setFormShortID(genHex(4));
     setFormPassword(genHex(8));
     if (!formSNI) setFormSNI("gateway.icloud.com");
-    toast.success("已通过本地生成安全随机凭据");
+    if (!silent) {
+      toast.success(t("tunnel.toastCredentialsGenerated", "已成功生成随机凭据与密钥对"));
+    }
   };
 
   // One-click SNI TLS 1.3 health probe
   const handleProbeSNI = async (targetSni: string) => {
     const sni = (targetSni || "").trim();
     if (!sni) {
-      toast.error("请输入或选择伪装域名 (SNI)");
+      toast.error(t("tunnel.toastEnterSNI", "请输入或选择伪装域名"));
       return;
     }
     setSniProbing(true);
@@ -491,15 +498,21 @@ const TunnelContent = () => {
       const data = await res.json().catch(() => ({}));
       if (res.ok && data.status === "success") {
         setSniProbeResult(data);
-        toast.success(`SNI 测活成功: ${data.tls_version} (${data.alpn || "None"}) - ${data.rtt_ms}ms`);
+        toast.success(
+          t("tunnel.toastSniProbeSuccess", "SNI 测活成功：{{version}}（{{alpn}}）- {{rtt}}ms", {
+            version: data.tls_version,
+            alpn: data.alpn || "None",
+            rtt: data.rtt_ms,
+          })
+        );
       } else {
         const errMsg = data.error || data.message || "握手探测失败";
         setSniProbeResult({ status: "error", error: errMsg });
-        toast.error(`测活失败: ${errMsg}`);
+        toast.error(t("tunnel.toastSniProbeFailed", "测活失败：{{error}}", { error: errMsg }));
       }
     } catch (e: any) {
       setSniProbeResult({ status: "error", error: e.message || "网络请求异常" });
-      toast.error(`测活异常: ${e.message}`);
+      toast.error(t("tunnel.toastSniProbeFailed", "测活失败：{{error}}", { error: e.message }));
     } finally {
       setSniProbing(false);
     }
@@ -543,9 +556,9 @@ const TunnelContent = () => {
 
     setForm2FaCode("");
 
-    // Auto-generate keys for vless / tuic
+    // Auto-generate keys for vless / tuic silently
     if (defaultType === "vless" || defaultType === "tuic" || defaultType === "shadowsocks" || defaultType === "socks5") {
-      setTimeout(() => handleGenerateCredentials(), 100);
+      setTimeout(() => handleGenerateCredentials(true), 100);
     }
 
     setEditDialogOpen(true);
@@ -601,14 +614,14 @@ const TunnelContent = () => {
     }
     const listenPortNum = Number(formListenPort);
     if (!listenPortNum || listenPortNum < 1 || listenPortNum > 65535) {
-      toast.error("请输入有效的监听端口 (1-65535)");
+      toast.error(t("tunnel.toastEnterValidListenPort", "请输入有效的监听端口（1-65535）"));
       return;
     }
 
     if (formRuleType === "forward") {
       const targetPortNum = Number(formTargetPort) || listenPortNum;
       if (targetPortNum < 1 || targetPortNum > 65535) {
-        toast.error("请输入有效的目标端口 (1-65535)");
+        toast.error(t("tunnel.toastEnterValidTargetPort", "请输入有效的目标端口（1-65535）"));
         return;
       }
       if (formTargetType === "custom" && !formTargetHost.trim()) {
@@ -617,31 +630,31 @@ const TunnelContent = () => {
       }
     } else if (formRuleType === "vless") {
       if (!formUUID.trim()) {
-        toast.error("VLESS 协议需要配置 UUID，可点击「一键生成」");
+        toast.error(t("tunnel.toastVlessRequiresUUID", "VLESS 协议需要配置用户 UUID"));
         return;
       }
       if (!formPrivateKey.trim()) {
-        toast.error("REALITY 模式需要配置私钥，可点击「一键生成」");
+        toast.error(t("tunnel.toastRealityRequiresPrivateKey", "REALITY 模式需要配置私钥"));
         return;
       }
     } else if (formRuleType === "tuic") {
       if (!formUUID.trim()) {
-        toast.error("TUIC 协议需要配置 UUID，可点击「一键生成」");
+        toast.error(t("tunnel.toastTuicRequiresUUID", "TUIC 协议需要配置用户 UUID"));
         return;
       }
       if (!formPassword.trim()) {
-        toast.error("TUIC 协议需要设置密码，可点击「一键生成」");
+        toast.error(t("tunnel.toastTuicRequiresPassword", "TUIC 协议需要设置访问密码"));
         return;
       }
     } else if (formRuleType === "shadowsocks" || formRuleType === "trojan" || formRuleType === "hysteria2") {
       if (!formPassword.trim()) {
-        toast.error("该协议需要设置密码，可点击「一键生成」");
+        toast.error(t("tunnel.toastProtocolRequiresPassword", "该协议需要设置访问密码"));
         return;
       }
     }
 
     if (formIsReverse && !formBridgeHost.trim()) {
-      toast.error("跨机反向穿透模式必须填写或选择中转机公网 IP / 域名");
+      toast.error(t("tunnel.toastReverseRequiresBridgeHost", "跨机反向穿透模式必须填写或选择中转机公网地址"));
       return;
     }
 
@@ -873,9 +886,14 @@ const TunnelContent = () => {
 
     navigator.clipboard.writeText(shareLink);
     if (rule.is_reverse && rule.bridge_host) {
-      toast.success(`已复制节点链接！(已自动绑定中转公网出口 ${targetHost}:${targetPort})`);
+      toast.success(
+        t("tunnel.toastCopiedWithBridge", "已复制节点链接（已绑定中转公网出口 {{host}}:{{port}}）", {
+          host: targetHost,
+          port: targetPort,
+        })
+      );
     } else {
-      toast.success("已复制节点/连接链接到剪贴板！可以直接导入客户端使用。");
+      toast.success(t("tunnel.toastCopied", "已复制节点链接至剪贴板"));
     }
   };
 
@@ -928,13 +946,13 @@ const TunnelContent = () => {
             <span className="hidden sm:inline">{t("common.refresh", "刷新")}</span>
           </Button>
 
-          <Button color="blue" onClick={() => handleOpenCreate("vless")} className="flex-1 sm:flex-initial">
-            <Sparkles className="w-4 h-4" />
-            <span>+ VLESS Reality</span>
+          <Button color="blue" variant="soft" onClick={() => handleOpenCreate("vless")} className="flex-1 sm:flex-initial">
+            <Sparkles className="w-4 h-4 mr-1" />
+            <span>{t("tunnel.quickVless", "+ VLESS Reality 节点")}</span>
           </Button>
 
           <Button onClick={() => handleOpenCreate("forward")} className="flex-1 sm:flex-initial">
-            <Plus className="w-4 h-4" />
+            <Plus className="w-4 h-4 mr-1" />
             <span>{t("tunnel.createTunnel", "新建规则")}</span>
           </Button>
         </div>
@@ -1010,16 +1028,16 @@ const TunnelContent = () => {
           <div className="flex flex-col items-center justify-center space-y-3">
             <Network className="w-12 h-12 text-gray-400 opacity-60" />
             <Text size="3" color="gray">
-              暂无通道或节点规则，点击上方「新建规则」或「+ VLESS Reality 节点」开始配置
+              {t("tunnel.emptyDescription", "暂无通道或节点规则，点击上方「新建规则」开始配置")}
             </Text>
-            <Flex gap="3">
-              <Button color="blue" onClick={() => handleOpenCreate("vless")}>
+            <Flex gap="3" className="flex-wrap justify-center">
+              <Button color="blue" variant="soft" onClick={() => handleOpenCreate("vless")}>
                 <Sparkles className="w-4 h-4 mr-1" />
-                创建 VLESS Reality 节点
+                {t("tunnel.quickVless", "+ VLESS Reality 节点")}
               </Button>
-              <Button variant="soft" onClick={() => handleOpenCreate("forward")}>
+              <Button variant="surface" onClick={() => handleOpenCreate("forward")}>
                 <Plus className="w-4 h-4 mr-1" />
-                {t("tunnel.createTunnel", "新建端口转发")}
+                {t("tunnel.createTunnel", "新建规则")}
               </Button>
             </Flex>
           </div>
@@ -1208,7 +1226,7 @@ const TunnelContent = () => {
                                 <span className="font-mono">{rule.uuid ? `${rule.uuid.slice(0, 8)}...` : "-"}</span>
                               </div>
                               <div>
-                                <span className="text-gray-400">协议: </span>
+                                <span className="text-gray-400">{t("tunnel.protocol", "协议")}: </span>
                                 <span className="font-mono text-xs">h3 / BBR</span>
                               </div>
                             </>
@@ -1304,10 +1322,17 @@ const TunnelContent = () => {
           }}
           className="p-4 sm:p-6 overflow-hidden"
         >
-          <Dialog.Title>
-            {editingRule ? t("tunnel.editTunnel", "编辑规则") : t("tunnel.createTunnel", "新建隧道或代理节点")}
-          </Dialog.Title>
-          <Dialog.Description size="2" color="gray" className="mb-4">
+          <div className="flex items-center justify-between mb-1">
+            <Dialog.Title className="!mb-0 text-base sm:text-lg font-bold">
+              {editingRule ? t("tunnel.editTunnel", "编辑规则") : t("tunnel.createTunnel", "新建隧道规则")}
+            </Dialog.Title>
+            <Dialog.Close>
+              <IconButton size="1" variant="ghost" color="gray" className="cursor-pointer" aria-label={t("common.cancel", "取消")}>
+                <X className="w-4 h-4" />
+              </IconButton>
+            </Dialog.Close>
+          </div>
+          <Dialog.Description size="2" color="gray" className="mb-4 text-xs sm:text-sm">
             {t("tunnel.modalDescription", "配置 Sing-box 运行规则，支持端口转发与 VLESS-Reality、SOCKS5、Shadowsocks 等主流协议，自动下发并放行防火墙")}
           </Dialog.Description>
 
@@ -1328,10 +1353,10 @@ const TunnelContent = () => {
 
             {/* Protocol Type Selector */}
             <div>
-              <Text as="label" size="2" weight="bold" className="block mb-1">
+              <Text as="label" size="2" weight="bold" className="block mb-1.5">
                 {t("tunnel.protocolType", "功能与协议类型")} *
               </Text>
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 sm:gap-2">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                 {[
                   { id: "forward", label: t("tunnel.protocols.forward", "端口转发"), icon: Radio },
                   { id: "vless", label: "VLESS Reality", icon: Sparkles },
@@ -1355,18 +1380,18 @@ const TunnelContent = () => {
                       }
                       if (nextType === "vless" || nextType === "tuic" || nextType === "socks5" || nextType === "shadowsocks") {
                         if (!formUUID && !formPassword) {
-                          handleGenerateCredentials();
+                          handleGenerateCredentials(true);
                         }
                       }
                     }}
-                    className={`flex items-center justify-center gap-1.5 p-2 rounded-lg border text-xs font-semibold transition-all ${
+                    className={`flex items-center justify-center gap-1.5 h-9 px-2 rounded-lg border text-xs font-semibold transition-all ${
                       formRuleType === item.id
                         ? "border-blue-500 bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300 dark:border-blue-600 shadow-sm"
                         : "border-gray-200 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-300"
                     }`}
                   >
                     <item.icon className="w-3.5 h-3.5 shrink-0" />
-                    <span className="truncate">{item.label}</span>
+                    <span className="truncate whitespace-nowrap">{item.label}</span>
                   </button>
                 ))}
               </div>
@@ -1464,7 +1489,7 @@ const TunnelContent = () => {
                         {t("tunnel.bridgeHost", "中转机公网地址")} *
                       </span>
                       <TextField.Root
-                        placeholder="例如: 158.179.168.46"
+                        placeholder={t("tunnel.bridgeHostPlaceholder", "例如: 158.179.168.46")}
                         value={formBridgeHost}
                         onChange={(e) => setFormBridgeHost(e.target.value)}
                       />
@@ -1475,7 +1500,7 @@ const TunnelContent = () => {
                       </span>
                       <TextField.Root
                         type="number"
-                        placeholder="例如: 20988 或 10085"
+                        placeholder={t("tunnel.bridgePortPlaceholder", "例如: 20988 或 10085")}
                         value={formBridgePort}
                         onChange={(e) => setFormBridgePort(e.target.value === "" ? "" : Number(e.target.value))}
                       />
@@ -1498,57 +1523,61 @@ const TunnelContent = () => {
             </div>
 
             {/* Listen Port */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 sm:gap-3">
-              <div>
-                <Text as="label" size="2" weight="bold" className="block mb-1">
-                  {t("tunnel.listenPort", "监听端口")} *
-                </Text>
-                <TextField.Root
-                  type="number"
-                  placeholder={formRuleType === "vless" ? "443 或 80" : "8080"}
-                  value={formListenPort}
-                  onChange={(e) => {
-                    const val = e.target.value === "" ? "" : Number(e.target.value);
-                    setFormListenPort(val);
-                    if (formTargetPort === "" || formTargetPort === formListenPort) {
-                      setFormTargetPort(val);
-                    }
-                  }}
-                />
-              </div>
+            <div>
+              {formRuleType === "forward" ? (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 sm:gap-3">
+                  <div>
+                    <Text as="label" size="2" weight="bold" className="block mb-1">
+                      {t("tunnel.listenPort", "监听端口")} *
+                    </Text>
+                    <TextField.Root
+                      type="number"
+                      placeholder={t("tunnel.listenPortPlaceholder", "8080")}
+                      value={formListenPort}
+                      onChange={(e) => {
+                        const val = e.target.value === "" ? "" : Number(e.target.value);
+                        setFormListenPort(val);
+                        if (formTargetPort === "" || formTargetPort === formListenPort) {
+                          setFormTargetPort(val);
+                        }
+                      }}
+                    />
+                  </div>
 
-              {formRuleType === "forward" && (
+                  <div>
+                    <Text as="label" size="2" weight="bold" className="block mb-1">
+                      {t("tunnel.transportProtocol", "传输协议")}
+                    </Text>
+                    <Select.Root
+                      value={formProtocol}
+                      onValueChange={(val: any) => setFormProtocol(val)}
+                    >
+                      <Select.Trigger className="w-full" />
+                      <Select.Content>
+                        <Select.Item value="tcp">TCP</Select.Item>
+                        <Select.Item value="udp">UDP</Select.Item>
+                        <Select.Item value="both">TCP + UDP</Select.Item>
+                      </Select.Content>
+                    </Select.Root>
+                  </div>
+                </div>
+              ) : (
                 <div>
                   <Text as="label" size="2" weight="bold" className="block mb-1">
-                    {t("tunnel.transportProtocol", "传输协议")}
+                    {t("tunnel.listenPort", "监听端口")} *
                   </Text>
-                  <Select.Root
-                    value={formProtocol}
-                    onValueChange={(val: any) => setFormProtocol(val)}
-                  >
-                    <Select.Trigger className="w-full" />
-                    <Select.Content>
-                      <Select.Item value="tcp">TCP</Select.Item>
-                      <Select.Item value="udp">UDP</Select.Item>
-                      <Select.Item value="both">TCP + UDP</Select.Item>
-                    </Select.Content>
-                  </Select.Root>
-                </div>
-              )}
-
-              {formRuleType !== "forward" && (
-                <div className="flex items-end">
-                  <Button
-                    type="button"
-                    variant="soft"
-                    color="purple"
-                    className="w-full h-9"
-                    onClick={handleGenerateCredentials}
-                    disabled={generatingKeys}
-                  >
-                    <Sparkles className={`w-3.5 h-3.5 mr-1 ${generatingKeys ? "animate-spin" : ""}`} />
-                    <span className="truncate">🎲 {t("tunnel.generateCredentials", "一键生成凭据密钥")}</span>
-                  </Button>
+                  <TextField.Root
+                    type="number"
+                    placeholder={formRuleType === "vless" ? "443" : "8080"}
+                    value={formListenPort}
+                    onChange={(e) => {
+                      const val = e.target.value === "" ? "" : Number(e.target.value);
+                      setFormListenPort(val);
+                      if (formTargetPort === "" || formTargetPort === formListenPort) {
+                        setFormTargetPort(val);
+                      }
+                    }}
+                  />
                 </div>
               )}
             </div>
@@ -1569,7 +1598,7 @@ const TunnelContent = () => {
                     </Text>
                     <TextField.Root
                       type="number"
-                      placeholder="例如：8080 (当前内网机器上的服务端口)"
+                      placeholder={t("tunnel.localTargetPortPlaceholder", "例如：8080")}
                       value={formTargetPort}
                       onChange={(e) => setFormTargetPort(e.target.value === "" ? "" : Number(e.target.value))}
                     />
@@ -1642,7 +1671,7 @@ const TunnelContent = () => {
                       </Text>
                       <TextField.Root
                         type="number"
-                        placeholder="例如：80 或 22"
+                        placeholder={t("tunnel.targetPortPlaceholder", "例如：80 或 22")}
                         value={formTargetPort}
                         onChange={(e) => setFormTargetPort(e.target.value === "" ? "" : Number(e.target.value))}
                       />
@@ -1697,7 +1726,7 @@ const TunnelContent = () => {
                       <Select.Content>
                         {CURATED_SNIS.map((s) => (
                           <Select.Item key={s.domain} value={s.domain}>
-                            {s.name} ({s.domain})
+                            {s.domain}
                           </Select.Item>
                         ))}
                       </Select.Content>
@@ -1713,7 +1742,7 @@ const TunnelContent = () => {
                       </Badge>
                     ) : (
                       <Badge color="red" variant="soft">
-                        ✗ 探测失败: {sniProbeResult.error}
+                        ✗ {t("tunnel.probeFailed", "探测失败")}: {sniProbeResult.error}
                       </Badge>
                     )}
                   </div>
@@ -1728,7 +1757,21 @@ const TunnelContent = () => {
                   <Text size="2" weight="bold" color="purple">
                     {t("tunnel.realitySettings", "REALITY 核心参数")}
                   </Text>
-                  <Badge color="purple" variant="soft">XTLS-Vision</Badge>
+                  <Flex align="center" gap="2">
+                    <Button
+                      size="1"
+                      variant="ghost"
+                      color="purple"
+                      type="button"
+                      disabled={generatingKeys}
+                      onClick={() => handleGenerateCredentials(false)}
+                      className="cursor-pointer text-xs"
+                    >
+                      <Sparkles className={`w-3.5 h-3.5 mr-1 ${generatingKeys ? "animate-spin" : ""}`} />
+                      {t("tunnel.generateCredentials", "一键生成凭据")}
+                    </Button>
+                    <Badge color="purple" variant="soft">XTLS-Vision</Badge>
+                  </Flex>
                 </Flex>
 
                 <div>
@@ -1748,7 +1791,7 @@ const TunnelContent = () => {
                       {t("tunnel.privateKey", "REALITY 私钥")} *
                     </Text>
                     <TextField.Root
-                      placeholder="x25519 私钥"
+                      placeholder={t("tunnel.privateKeyPlaceholder", "x25519 私钥")}
                       value={formPrivateKey}
                       onChange={(e) => setFormPrivateKey(e.target.value)}
                     />
@@ -1759,7 +1802,7 @@ const TunnelContent = () => {
                       {t("tunnel.publicKey", "REALITY 公钥")}
                     </Text>
                     <TextField.Root
-                      placeholder="x25519 公钥 (用于分享)"
+                      placeholder={t("tunnel.publicKeyPlaceholder", "x25519 公钥（用于分享）")}
                       value={formPublicKey}
                       onChange={(e) => setFormPublicKey(e.target.value)}
                     />
@@ -1771,7 +1814,7 @@ const TunnelContent = () => {
                     Short ID
                   </Text>
                   <TextField.Root
-                    placeholder="例如：6ba85170"
+                    placeholder={t("tunnel.shortIdPlaceholder", "例如：6ba85170")}
                     value={formShortID}
                     onChange={(e) => setFormShortID(e.target.value)}
                   />
@@ -1784,12 +1827,12 @@ const TunnelContent = () => {
                   <Select.Root value={formFingerprint} onValueChange={(val) => setFormFingerprint(val)}>
                     <Select.Trigger className="w-full" />
                     <Select.Content>
-                      <Select.Item value="ios">ios (推荐，完美匹配 Apple/iCloud 伪装)</Select.Item>
-                      <Select.Item value="edge">edge (微软 Edge 浏览器指纹)</Select.Item>
-                      <Select.Item value="chrome">chrome (标准 Google Chrome 指纹)</Select.Item>
-                      <Select.Item value="random">random (随机浏览器指纹)</Select.Item>
-                      <Select.Item value="safari">safari (苹果 Safari 指纹)</Select.Item>
-                      <Select.Item value="firefox">firefox (火狐 Firefox 指纹)</Select.Item>
+                      <Select.Item value="ios">ios</Select.Item>
+                      <Select.Item value="chrome">chrome</Select.Item>
+                      <Select.Item value="edge">edge</Select.Item>
+                      <Select.Item value="safari">safari</Select.Item>
+                      <Select.Item value="firefox">firefox</Select.Item>
+                      <Select.Item value="random">random</Select.Item>
                     </Select.Content>
                   </Select.Root>
                 </div>
@@ -1803,7 +1846,21 @@ const TunnelContent = () => {
                   <Text size="2" weight="bold" color="teal">
                     {t("tunnel.tuicSettings", "TUIC v5 核心参数")}
                   </Text>
-                  <Badge color="teal" variant="soft">0-RTT · BBR</Badge>
+                  <Flex align="center" gap="2">
+                    <Button
+                      size="1"
+                      variant="ghost"
+                      color="teal"
+                      type="button"
+                      disabled={generatingKeys}
+                      onClick={() => handleGenerateCredentials(false)}
+                      className="cursor-pointer text-xs"
+                    >
+                      <Sparkles className={`w-3.5 h-3.5 mr-1 ${generatingKeys ? "animate-spin" : ""}`} />
+                      {t("tunnel.generateCredentials", "一键生成凭据")}
+                    </Button>
+                    <Badge color="teal" variant="soft">0-RTT · BBR</Badge>
+                  </Flex>
                 </Flex>
 
                 <div>
@@ -1811,7 +1868,7 @@ const TunnelContent = () => {
                     {t("tunnel.userUUID", "用户 UUID")} *
                   </Text>
                   <TextField.Root
-                    placeholder="用户 UUID"
+                    placeholder={t("tunnel.userUUIDPlaceholder", "用户 UUID")}
                     value={formUUID}
                     onChange={(e) => setFormUUID(e.target.value)}
                   />
@@ -1822,14 +1879,14 @@ const TunnelContent = () => {
                     {t("tunnel.accessPassword", "访问密码")} *
                   </Text>
                   <TextField.Root
-                    placeholder="连接认证密码"
+                    placeholder={t("tunnel.accessPasswordPlaceholder", "连接认证密码")}
                     value={formPassword}
                     onChange={(e) => setFormPassword(e.target.value)}
                   />
                 </div>
 
                 <div className="text-xs text-gray-500">
-                  💡 拥塞控制算法默认使用 <strong>BBR</strong>，应用层协议协商 (ALPN) 自动配置为 <strong>h3</strong>，证书自动签发并挂载。
+                  {t("tunnel.tuicNotice", "拥塞控制算法默认使用 BBR，应用层协议协商自动配置为 h3，证书自动签发并挂载。")}
                 </div>
               </div>
             )}
@@ -1841,7 +1898,21 @@ const TunnelContent = () => {
                   <Text size="2" weight="bold" color="pink">
                     {t("tunnel.hysteria2Settings", "Hysteria 2 混淆配置")}
                   </Text>
-                  <Badge color="pink" variant="soft">UDP 加速</Badge>
+                  <Flex align="center" gap="2">
+                    <Button
+                      size="1"
+                      variant="ghost"
+                      color="pink"
+                      type="button"
+                      disabled={generatingKeys}
+                      onClick={() => handleGenerateCredentials(false)}
+                      className="cursor-pointer text-xs"
+                    >
+                      <Sparkles className={`w-3.5 h-3.5 mr-1 ${generatingKeys ? "animate-spin" : ""}`} />
+                      {t("tunnel.generateCredentials", "一键生成凭据")}
+                    </Button>
+                    <Badge color="pink" variant="soft">UDP 加速</Badge>
+                  </Flex>
                 </Flex>
 
                 <div>
@@ -1849,7 +1920,7 @@ const TunnelContent = () => {
                     {t("tunnel.accessPassword", "访问密码")} *
                   </Text>
                   <TextField.Root
-                    placeholder="设置连接密码"
+                    placeholder={t("tunnel.accessPasswordPlaceholder", "连接认证密码")}
                     value={formPassword}
                     onChange={(e) => setFormPassword(e.target.value)}
                   />
@@ -1869,11 +1940,12 @@ const TunnelContent = () => {
                         setFormObfsPassword(rand);
                       }}
                     >
-                      🎲 {t("tunnel.randomGenerate", "随机生成")}
+                      <Sparkles className="w-3.5 h-3.5 mr-1" />
+                      {t("tunnel.randomGenerate", "随机生成")}
                     </Button>
                   </div>
                   <TextField.Root
-                    placeholder="输入混淆密码（建议配置，可有效突破晚高峰 UDP 限速）"
+                    placeholder={t("tunnel.obfsPasswordPlaceholder", "输入混淆密码（可选，可有效突破晚高峰 UDP 限速）")}
                     value={formObfsPassword}
                     onChange={(e) => setFormObfsPassword(e.target.value)}
                   />
@@ -1892,7 +1964,7 @@ const TunnelContent = () => {
                     {t("tunnel.accessPassword", "访问密码")} *
                   </Text>
                   <TextField.Root
-                    placeholder="设置连接密码"
+                    placeholder={t("tunnel.accessPasswordPlaceholder", "连接认证密码")}
                     value={formPassword}
                     onChange={(e) => setFormPassword(e.target.value)}
                   />
@@ -1904,7 +1976,7 @@ const TunnelContent = () => {
             {formRuleType === "socks5" && (
               <div className="space-y-3 border border-gray-100 dark:border-gray-800 p-3 rounded-lg bg-gray-50/50 dark:bg-gray-800/30">
                 <Text size="2" weight="bold">
-                  {t("tunnel.socks5Settings", "SOCKS5 认证设置 (留空免密)")}
+                  {t("tunnel.socks5Settings", "SOCKS5 认证设置")}
                 </Text>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 sm:gap-3">
                   <div>
@@ -1912,7 +1984,7 @@ const TunnelContent = () => {
                       {t("tunnel.username", "用户名")}
                     </Text>
                     <TextField.Root
-                      placeholder="默认: komari"
+                      placeholder={t("tunnel.usernamePlaceholder", "默认: komari")}
                       value={formUsername}
                       onChange={(e) => setFormUsername(e.target.value)}
                     />
@@ -1922,7 +1994,7 @@ const TunnelContent = () => {
                       {t("tunnel.password", "密码")}
                     </Text>
                     <TextField.Root
-                      placeholder="设置密码"
+                      placeholder={t("tunnel.passwordPlaceholder", "输入或生成安全密码")}
                       value={formPassword}
                       onChange={(e) => setFormPassword(e.target.value)}
                     />
@@ -1934,9 +2006,23 @@ const TunnelContent = () => {
             {/* Mode 7: Shadowsocks Specifics */}
             {formRuleType === "shadowsocks" && (
               <div className="space-y-3 border border-gray-100 dark:border-gray-800 p-3 rounded-lg bg-gray-50/50 dark:bg-gray-800/30">
-                <Text size="2" weight="bold">
-                  {t("tunnel.shadowsocksSettings", "Shadowsocks 设置")}
-                </Text>
+                <Flex justify="between" align="center">
+                  <Text size="2" weight="bold">
+                    {t("tunnel.shadowsocksSettings", "Shadowsocks 设置")}
+                  </Text>
+                  <Button
+                    size="1"
+                    variant="ghost"
+                    color="gray"
+                    type="button"
+                    disabled={generatingKeys}
+                    onClick={() => handleGenerateCredentials(false)}
+                    className="cursor-pointer text-xs"
+                  >
+                    <Sparkles className={`w-3.5 h-3.5 mr-1 ${generatingKeys ? "animate-spin" : ""}`} />
+                    {t("tunnel.generateCredentials", "一键生成凭据")}
+                  </Button>
+                </Flex>
                 <div>
                   <Text as="label" size="2" weight="medium" className="block mb-1">
                     {t("tunnel.encryptionMethod", "加密方法")}
@@ -1947,7 +2033,7 @@ const TunnelContent = () => {
                   >
                     <Select.Trigger className="w-full" />
                     <Select.Content>
-                      <Select.Item value="2022-blake3-aes-128-gcm">2022-blake3-aes-128-gcm (推荐)</Select.Item>
+                      <Select.Item value="2022-blake3-aes-128-gcm">2022-blake3-aes-128-gcm</Select.Item>
                       <Select.Item value="2022-blake3-aes-256-gcm">2022-blake3-aes-256-gcm</Select.Item>
                       <Select.Item value="2022-blake3-chacha20-poly1305">2022-blake3-chacha20-poly1305</Select.Item>
                       <Select.Item value="aes-128-gcm">aes-128-gcm</Select.Item>
@@ -1961,7 +2047,7 @@ const TunnelContent = () => {
                     {t("tunnel.password", "密码")} *
                   </Text>
                   <TextField.Root
-                    placeholder="输入或生成密码"
+                    placeholder={t("tunnel.passwordPlaceholder", "输入或生成安全密码")}
                     value={formPassword}
                     onChange={(e) => setFormPassword(e.target.value)}
                   />
@@ -2011,7 +2097,7 @@ const TunnelContent = () => {
                   {t("tunnel.twoFaPrompt", "2FA 动态验证码")} *
                 </Text>
                 <TextField.Root
-                  placeholder="请输入 6 位动态验证码"
+                  placeholder={t("tunnel.twoFaPlaceholder", "请输入 6 位动态验证码")}
                   value={form2FaCode}
                   maxLength={6}
                   onChange={(e) => setForm2FaCode(e.target.value)}
@@ -2043,9 +2129,16 @@ const TunnelContent = () => {
           }}
           className="p-4 sm:p-6"
         >
-          <Dialog.Title color="red">
-            {t("tunnel.deleteTunnel", "删除规则")}
-          </Dialog.Title>
+          <div className="flex items-center justify-between mb-1">
+            <Dialog.Title color="red" className="!mb-0">
+              {t("tunnel.deleteTunnel", "删除规则")}
+            </Dialog.Title>
+            <Dialog.Close>
+              <IconButton size="1" variant="ghost" color="gray" className="cursor-pointer" aria-label={t("common.cancel", "取消")}>
+                <X className="w-4 h-4" />
+              </IconButton>
+            </Dialog.Close>
+          </div>
           <Dialog.Description size="2" color="gray" className="mb-4">
             {t("tunnel.deleteConfirmDesc", "确定要删除该规则吗？Agent 将自动释放监听端口并关闭防火墙放行规则。")}
           </Dialog.Description>
@@ -2067,7 +2160,7 @@ const TunnelContent = () => {
                 {t("tunnel.twoFaPrompt", "2FA 动态验证码")} *
               </Text>
               <TextField.Root
-                placeholder="请输入 6 位动态验证码"
+                placeholder={t("tunnel.twoFaPlaceholder", "请输入 6 位动态验证码")}
                 value={delete2FaCode}
                 maxLength={6}
                 onChange={(e) => setDelete2FaCode(e.target.value)}

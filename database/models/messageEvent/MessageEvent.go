@@ -6,6 +6,7 @@ const (
 	Expire  = "Expire"
 	Renew   = "Renew"
 	Login   = "Login"
-	Alert   = "Alert"
-	Traffic = "Traffic"
+	Alert      = "Alert"
+	Traffic    = "Traffic"
+	CronFailed = "CronFailed"
 )

@@ -24,8 +24,10 @@ func CreateTask(taskId string, clients []string, command string) error {
 	for _, client := range clients {
 		taskResults = append(taskResults, models.TaskResult{
 			TaskId:     taskId,
-			ClientUUID: client,
-			ExitCode:   -1,
+			Client:     client,
+			Result:     "",
+			ExitCode:   nil,
+			FinishedAt: nil,
 			CreatedAt:  time.Now().UTC(),
 		})
 	}
@@ -80,7 +82,7 @@ func DeleteTaskByTaskId(taskId string) error {
 func SaveTaskResult(taskId, clientId, result string, exitCode int, timestamp time.Time) error {
 	db := dbcore.GetDBInstance()
 	return db.Model(&models.TaskResult{}).
-		Where("task_id = ? AND client_uuid = ?", taskId, clientId).
+		Where("task_id = ? AND (client = ? OR client_uuid = ?)", taskId, clientId, clientId).
 		Updates(map[string]interface{}{
 			"result":       result,
 			"exit_code":    exitCode,

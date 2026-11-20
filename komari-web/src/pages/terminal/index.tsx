@@ -1,31 +1,35 @@
-import "@xterm/xterm/css/xterm.css";
 import { Theme } from "@radix-ui/themes";
-import { TerminalContext } from "@/contexts/TerminalContext";
 import TerminalNotices from "./TerminalNotices";
 import TerminalResourceMonitor from "./TerminalResourceMonitor";
-import TerminalTabBar from "./TerminalTabBar";
 import TerminalWorkspace from "./TerminalWorkspace";
+import RecoverableSessionsDialog from "./RecoverableSessionsDialog";
+import TerminalSettingsDialog from "./TerminalSettingsDialog";
 import { useTerminalPage } from "./useTerminalPage";
 import { lazy, Suspense, useState } from "react";
-import Workbench2FaDialog from "./Workbench2FaDialog";
-import { isClientWorkbenchVerified, markClientWorkbenchVerified } from "./workbench2FaAuth";
+import TerminalGuide from "@/components/onboarding/TerminalGuide";
 
 const FileEditorDialog = lazy(() => import("./FileEditorDialog"));
 
 const TerminalPage = () => {
   const {
+    onboardingAuthenticated,
     t,
-    resolvedSettings,
     appearance,
     clients,
     clientsLoading,
+    showRecoverableDialog,
+    recoverableSessionsCount,
+    recoverableSessionGroups,
+    recoverableSubmitting,
     tabs,
+    paneTree,
+    leaves,
+    activePaneId,
     activeTabId,
     editingTabId,
     renameDraft,
-    serverMenuOpen,
-    isClipboardOpen,
-    sidebarTab,
+    serverMenuPaneId,
+    isSidebarOpen,
     leftWidth,
     httpsCalloutOpen,
     twoFaEnabled,
@@ -36,14 +40,19 @@ const TerminalPage = () => {
     searchCaseSensitive,
     searchUseRegex,
     resourceMonitorServers,
+    tabLatencies,
+    terminalSettings,
+    settingsOpen,
+    setSettingsOpen,
+    updateTerminalSettings,
+    resetTerminalSettings,
     containerRef,
-    contextValue,
     sessionsReady,
-    setActiveTabId,
-    setServerMenuOpen,
+    focusPane,
+    activateTabInPane,
+    setServerMenuPaneId,
     setRenameDraft,
-    setIsClipboardOpen,
-    setSidebarTab,
+    setIsSidebarOpen,
     setHttpsCalloutOpen,
     handleSearchTermChange,
     handleFindNext,
@@ -55,6 +64,8 @@ const TerminalPage = () => {
     openFileManager,
     closeSearch,
     handleApiChange,
+    handleLatencyChange,
+    handleTitleChange,
     startDragging,
     openClient,
     startRename,
@@ -65,27 +76,23 @@ const TerminalPage = () => {
     colorTab,
     closeTab,
     reorderTab,
+    splitPane,
+    moveTab,
+    resizeSplit,
+    fitAllSessions,
+    handleRecoverSessions,
+    handleTerminateRecoverableSessions,
   } = useTerminalPage();
 
   const [editorUuid, setEditorUuid] = useState<string | null>(null);
-  const [workbenchMenuOpen, setWorkbenchMenuOpen] = useState(false);
-  const [workbench2FaClient, setWorkbench2FaClient] = useState<{
-    uuid: string;
-    name?: string;
-    os?: string;
-  } | null>(null);
-
-  const handleOpenWorkbenchClient = (client: { uuid: string; name?: string; os?: string }) => {
-    setWorkbenchMenuOpen(false);
-    if (twoFaEnabled && !isClientWorkbenchVerified(client.uuid)) {
-      setWorkbench2FaClient(client);
-    } else {
-      setEditorUuid(client.uuid);
-    }
-  };
+  const [workbenchMenuPaneId, setWorkbenchMenuPaneId] = useState<string | null>(
+    null,
+  );
+  const editorClient = editorUuid
+    ? clients.find((item) => item.uuid === editorUuid)
+    : undefined;
 
   return (
-    <TerminalContext.Provider value={contextValue}>
       <Theme
         appearance="dark"
         className="km-page-terminal fixed inset-0 h-screen w-screen overflow-hidden bg-[#1e1e1e]"
@@ -99,61 +106,24 @@ const TerminalPage = () => {
           className="km-terminal-shell flex h-screen w-screen min-w-0 flex-col bg-[#1e1e1e] text-[#cccccc]"
           style={appearance}
         >
-          <TerminalTabBar
+          <TerminalWorkspace
+            containerRef={containerRef}
+            isSidebarOpen={isSidebarOpen}
+            leftWidth={leftWidth}
             tabs={tabs}
+            paneTree={paneTree}
+            leaves={leaves}
+            activePaneId={activePaneId}
             clients={clients}
             clientsLoading={clientsLoading}
             activeTabId={activeTabId}
             editingTabId={editingTabId}
             renameDraft={renameDraft}
-            serverMenuOpen={serverMenuOpen}
-            onServerMenuOpenChange={(open) => {
-              setServerMenuOpen(open);
-              if (open) setWorkbenchMenuOpen(false);
-            }}
-            workbenchMenuOpen={workbenchMenuOpen}
-            onWorkbenchMenuOpenChange={(open) => {
-              setWorkbenchMenuOpen(open);
-              if (open) setServerMenuOpen(false);
-            }}
-            onActivate={setActiveTabId}
-            onOpenTerminalClient={openClient}
-            onOpenWorkbenchClient={handleOpenWorkbenchClient}
-            onStartRename={startRename}
-            onDraftChange={setRenameDraft}
-            onCommitRename={commitRename}
-            onCancelRename={cancelRename}
-            onDuplicate={duplicateTab}
-            onExportText={exportText}
-            onFind={openSearch}
-            onOpenFileManager={openFileManager}
-            onOpenEditor={(tabId) => {
-              const tab = tabs.find((t) => t.id === tabId);
-              if (!tab) return;
-              const matchedClient = clients.find((c) => c.uuid === tab.uuid);
-              handleOpenWorkbenchClient({
-                uuid: tab.uuid,
-                name: matchedClient?.name || tab.title,
-                os: matchedClient?.os,
-              });
-            }}
+            serverMenuPaneId={serverMenuPaneId}
+            workbenchMenuPaneId={workbenchMenuPaneId}
             resourceMonitorServers={resourceMonitorServers}
-            onToggleResourceWindow={toggleResourceMonitor}
-            onColor={colorTab}
-            onClose={closeTab}
-            onReorder={reorderTab}
-          />
-
-          <TerminalWorkspace
-            containerRef={containerRef}
-            isClipboardOpen={isClipboardOpen}
-            sidebarTab={sidebarTab}
-            leftWidth={leftWidth}
-            tabs={tabs}
-            clientsLoading={clientsLoading}
-            activeTabId={activeTabId}
+            tabLatencies={tabLatencies}
             sessionsReady={sessionsReady}
-            settings={resolvedSettings}
             twoFaEnabled={twoFaEnabled}
             disconnectMessage={t("terminal.disconnect")}
             searchOpen={searchOpen}
@@ -169,27 +139,87 @@ const TerminalPage = () => {
             onToggleUseRegex={handleToggleUseRegex}
             onCloseSearch={closeSearch}
             onApiChange={handleApiChange}
-            onToggleSidebar={() => setIsClipboardOpen((open) => !open)}
-            onSidebarTabChange={(tab) => {
-              setSidebarTab(tab);
-              setIsClipboardOpen(true);
-            }}
+            onLatencyChange={handleLatencyChange}
+            onTitleChange={handleTitleChange}
+            onToggleSidebar={() => setIsSidebarOpen((open) => !open)}
             onStartDragging={startDragging}
-            onOpenTerminalMenu={() => {
-              setWorkbenchMenuOpen(false);
-              setServerMenuOpen(true);
+            onFocusPane={focusPane}
+            onActivateTab={activateTabInPane}
+            onServerMenuOpenChange={(paneId, open) => {
+              setServerMenuPaneId(open ? paneId : null);
+              if (open) setWorkbenchMenuPaneId(null);
             }}
-            onOpenWorkbenchMenu={() => {
-              setServerMenuOpen(false);
-              setWorkbenchMenuOpen(true);
+            onWorkbenchMenuOpenChange={(paneId, open) => {
+              setWorkbenchMenuPaneId(open ? paneId : null);
+              if (open) setServerMenuPaneId(null);
             }}
+            onOpenTerminalClient={(client, paneId) => openClient(client, paneId)}
+            onOpenWorkbenchClient={(client) => {
+              setEditorUuid(client.uuid);
+              setWorkbenchMenuPaneId(null);
+            }}
+            onStartRename={startRename}
+            onDraftChange={setRenameDraft}
+            onCommitRename={commitRename}
+            onCancelRename={cancelRename}
+            onDuplicate={duplicateTab}
+            onExportText={exportText}
+            onFind={openSearch}
+            onOpenFileManager={openFileManager}
+            onOpenEditor={(tabId) => {
+              const uuid = tabs.find((tab) => tab.id === tabId)?.uuid;
+              if (uuid) setEditorUuid(uuid);
+            }}
+            onToggleResourceWindow={toggleResourceMonitor}
+            onColor={colorTab}
+            onClose={closeTab}
+            onReorderTab={reorderTab}
+            onSplitPane={splitPane}
+            onMoveTab={moveTab}
+            onResizeSplit={resizeSplit}
+            onResizeSplitEnd={fitAllSessions}
+            terminalSettings={terminalSettings}
+            onOpenSettings={() => setSettingsOpen(true)}
           />
         </div>
+
+        <TerminalSettingsDialog
+          open={settingsOpen}
+          settings={terminalSettings}
+          onChange={updateTerminalSettings}
+          onReset={resetTerminalSettings}
+          onClose={() => setSettingsOpen(false)}
+        />
 
         <TerminalResourceMonitor
           clients={clients}
           servers={resourceMonitorServers}
           onRemove={toggleResourceMonitor}
+        />
+        <TerminalGuide
+          authenticated={onboardingAuthenticated}
+          hasTabs={!clientsLoading && tabs.length > 0}
+          blocked={
+            Boolean(showRecoverableDialog) ||
+            Boolean(editorUuid) ||
+            Boolean(serverMenuPaneId) ||
+            Boolean(workbenchMenuPaneId) ||
+            Boolean(editingTabId) ||
+            Boolean(settingsOpen)
+          }
+        />
+
+        <RecoverableSessionsDialog
+          open={showRecoverableDialog}
+          totalCount={recoverableSessionsCount}
+          groups={recoverableSessionGroups}
+          submitting={recoverableSubmitting}
+          onTerminate={() => {
+            void handleTerminateRecoverableSessions();
+          }}
+          onRecover={() => {
+            void handleRecoverSessions();
+          }}
         />
 
         {editorUuid && (
@@ -197,32 +227,18 @@ const TerminalPage = () => {
             <FileEditorDialog
               open
               uuid={editorUuid}
+              serverName={editorClient?.name}
+              serverOs={editorClient?.os}
               initialFile={null}
-              twoFaEnabled={twoFaEnabled}
-              fontFamily={resolvedSettings.terminalOptions.fontFamily}
+              fontFamily={terminalSettings.fontFamily}
+              terminalSettings={terminalSettings}
               onOpenChange={(open) => {
                 if (!open) setEditorUuid(null);
               }}
             />
           </Suspense>
         )}
-
-        <Workbench2FaDialog
-          open={workbench2FaClient !== null}
-          client={workbench2FaClient}
-          onOpenChange={(open) => {
-            if (!open) setWorkbench2FaClient(null);
-          }}
-          onSuccess={() => {
-            if (workbench2FaClient) {
-              markClientWorkbenchVerified(workbench2FaClient.uuid);
-              setEditorUuid(workbench2FaClient.uuid);
-              setWorkbench2FaClient(null);
-            }
-          }}
-        />
       </Theme>
-    </TerminalContext.Provider>
   );
 };
 

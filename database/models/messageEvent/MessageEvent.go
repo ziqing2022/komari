@@ -8,5 +8,4 @@ const (
 	Login   = "Login"
 	Alert   = "Alert"
 	Traffic = "Traffic"
-	CronFailed = "CronFailed"
 )

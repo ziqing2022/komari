@@ -22,12 +22,12 @@ export class RPC2Client {
   private pendingRequests = new Map<string | number, {
     resolve: (value: any) => void;
     reject: (reason?: any) => void;
-    timeout?: NodeJS.Timeout;
+    timeout?: ReturnType<typeof setTimeout>;
   }>();
   private reconnectAttempts = 0;
-  private reconnectTimeout?: NodeJS.Timeout;
-  private heartbeatInterval?: NodeJS.Timeout;
-  private stableConnectionTimeout?: NodeJS.Timeout;
+  private reconnectTimeout?: ReturnType<typeof setTimeout>;
+  private heartbeatInterval?: ReturnType<typeof setTimeout>;
+  private stableConnectionTimeout?: ReturnType<typeof setTimeout>;
   private manualDisconnect = false;
   private connectionGeneration = 0;
   private eventListeners: RPC2EventListeners = {};
@@ -282,18 +282,7 @@ export class RPC2Client {
       });
 
       if (!response.ok) {
-        let errorMsg = `HTTP ${response.status}${response.statusText ? ": " + response.statusText : ""}`;
-        try {
-          const jsonErr = await response.clone().json();
-          if (jsonErr?.message) {
-            errorMsg = jsonErr.message;
-          }
-        } catch {
-          // ignore parsing error
-        }
-        const httpError: any = new Error(errorMsg);
-        httpError.status = response.status;
-        throw httpError;
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
       }
 
       if (options.notification) {
@@ -342,18 +331,7 @@ export class RPC2Client {
       });
 
       if (!response.ok) {
-        let errorMsg = `HTTP ${response.status}${response.statusText ? ": " + response.statusText : ""}`;
-        try {
-          const jsonErr = await response.clone().json();
-          if (jsonErr?.message) {
-            errorMsg = jsonErr.message;
-          }
-        } catch {
-          // ignore parsing error
-        }
-        const httpError: any = new Error(errorMsg);
-        httpError.status = response.status;
-        throw httpError;
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
       }
 
       const jsonResponse: JSONRPC2BatchResponse = await response.json();

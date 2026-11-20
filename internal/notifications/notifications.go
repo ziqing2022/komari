@@ -12,13 +12,6 @@ import (
 	"github.com/komari-monitor/komari/utils/messageSender"
 	"github.com/komari-monitor/komari/utils/messageSender/javascript"
 	"github.com/komari-monitor/komari/utils/messageSender/webhook"
-
-	_ "github.com/komari-monitor/komari/utils/messageSender/bark"
-	_ "github.com/komari-monitor/komari/utils/messageSender/email"
-	_ "github.com/komari-monitor/komari/utils/messageSender/empty"
-	_ "github.com/komari-monitor/komari/utils/messageSender/serverchan3"
-	_ "github.com/komari-monitor/komari/utils/messageSender/serverchanturbo"
-	_ "github.com/komari-monitor/komari/utils/messageSender/telegram"
 )
 
 // Initialize registers the built-in channels and seeds their defaults.
@@ -38,7 +31,6 @@ func Initialize() (err error) {
 		return err
 	}
 	registered = append(registered, javascript.ChannelID)
-	messageSender.RegisterFactoryChannels()
 	for _, item := range messageSender.ListNotificationChannels() {
 		if _, err := database.GetMessageSenderConfigByName(item.ID); err == nil {
 			continue
@@ -65,9 +57,8 @@ func Initialize() (err error) {
 
 // Shutdown unregisters the built-in channels and releases their runtimes.
 func Shutdown() error {
-	var err error
-	for _, ch := range messageSender.ListNotificationChannels() {
-		err = errors.Join(err, messageSender.UnregisterNotificationChannel(ch.ID))
-	}
-	return err
+	return errors.Join(
+		messageSender.UnregisterNotificationChannel(javascript.ChannelID),
+		messageSender.UnregisterNotificationChannel("webhook"),
+	)
 }

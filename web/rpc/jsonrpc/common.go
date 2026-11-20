@@ -14,6 +14,7 @@ import (
 	"github.com/komari-monitor/komari/database/models"
 	"github.com/komari-monitor/komari/database/tasks"
 	"github.com/komari-monitor/komari/internal/config"
+	"github.com/komari-monitor/komari/internal/metricstore"
 	"github.com/komari-monitor/komari/pkg/rpc"
 	v2 "github.com/komari-monitor/komari/protocol/v2"
 	"github.com/komari-monitor/komari/utils"
@@ -60,7 +61,7 @@ func getPingStatsForNode(uuid string, pingTasks []models.PingTask) map[string]pi
 	}
 	end := time.Now().UTC()
 	start := end.Add(-1 * time.Hour)
-	recs, err := tasks.GetPingRecords(uuid, -1, start, end)
+	recs, err := metricstore.GetPingRecords(context.Background(), uuid, -1, start, end)
 	if err != nil || len(recs) == 0 {
 		empty := map[string]pingStat{}
 		pingStatsCache.Set(key, empty, cache.DefaultExpiration)
@@ -320,7 +321,7 @@ func getNodesLatestStatus(ctx context.Context, req *rpc.JsonRpcRequest) (any, *r
 
 	// 如果指定 uuid 但找不到，直接返回 not found
 	if params.UUID != "" {
-		if _, ok := latest[params.UUID]; !ok && !onlineSet[params.UUID] {
+		if _, ok := latest[params.UUID]; !ok {
 			return nil, rpc.MakeError(rpc.InvalidParams, "Node not found", params.UUID)
 		}
 	}
@@ -401,14 +402,7 @@ func getNodesLatestStatus(ctx context.Context, req *rpc.JsonRpcRequest) (any, *r
 
 	// 选择逻辑
 	if params.UUID != "" { // 单个
-		if rep, ok := latest[params.UUID]; ok {
-			appendOne(params.UUID, rep)
-		} else if onlineSet[params.UUID] {
-			respMap[params.UUID] = recordLike{
-				Client: params.UUID,
-				Online: true,
-			}
-		}
+		appendOne(params.UUID, latest[params.UUID])
 		return respMap[params.UUID], nil
 	}
 	selected := map[string]bool{}
@@ -421,28 +415,10 @@ func getNodesLatestStatus(ctx context.Context, req *rpc.JsonRpcRequest) (any, *r
 				appendOne(uuid, rep)
 			}
 		}
-		for _, uuid := range onlineUUIDs {
-			if selected[uuid] {
-				if _, ok := respMap[uuid]; !ok {
-					respMap[uuid] = recordLike{
-						Client: uuid,
-						Online: true,
-					}
-				}
-			}
-		}
 		return respMap, nil
 	}
 	for uuid, rep := range latest {
 		appendOne(uuid, rep)
-	}
-	for _, uuid := range onlineUUIDs {
-		if _, ok := respMap[uuid]; !ok {
-			respMap[uuid] = recordLike{
-				Client: uuid,
-				Online: true,
-			}
-		}
 	}
 	return respMap, nil
 }

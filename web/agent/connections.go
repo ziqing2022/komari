@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"maps"
 	"sort"
 	"sync"
 	"time"
@@ -55,11 +56,7 @@ func GetConnectedClientUUIDs() []string {
 func GetConnectedClients() map[string]*connection.SafeConn {
 	mu.RLock()
 	defer mu.RUnlock()
-	clientsCopy := make(map[string]*connection.SafeConn)
-	for k, v := range connectedClients {
-		clientsCopy[k] = v
-	}
-	return clientsCopy
+	return maps.Clone(connectedClients)
 }
 
 func SetConnectedClients(uuid string, conn *connection.SafeConn) {

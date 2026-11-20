@@ -1,9 +1,7 @@
 package clients
 
 import (
-	"encoding/json"
 	"fmt"
-	logger "github.com/komari-monitor/komari/utils/log"
 	"math"
 	"sync"
 	"time"
@@ -11,7 +9,7 @@ import (
 	"github.com/komari-monitor/komari/database/dbcore"
 	"github.com/komari-monitor/komari/database/models"
 	"github.com/komari-monitor/komari/database/tasks"
-	"github.com/komari-monitor/komari/utils"
+	logger "github.com/komari-monitor/komari/utils/log"
 
 	"github.com/google/uuid"
 )
@@ -36,23 +34,13 @@ func clientInfoFingerprint(m map[string]interface{}) string {
 
 func DeleteClient(clientUuid string) error {
 	InvalidateClientBasicInfoFingerprint(clientUuid)
-	db := dbcore.GetDBInstance()
-	err := db.Delete(&models.Client{}, "uuid = ?", clientUuid).Error
-	if err != nil {
-		return err
-	}
-	return nil
+	return dbcore.GetDBInstance().Delete(&models.Client{}, "uuid = ?", clientUuid).Error
 }
 
 func SaveClientInfo(update map[string]interface{}) error {
 	clientUUID, ok := update["uuid"].(string)
 	if !ok || clientUUID == "" {
 		return fmt.Errorf("invalid client UUID")
-	}
-
-	// 确保更新的字段不为空
-	if len(update) == 0 {
-		return fmt.Errorf("no fields to update")
 	}
 
 	fp := clientInfoFingerprint(update)
@@ -65,83 +53,67 @@ func SaveClientInfo(update map[string]interface{}) error {
 	update["updated_at"] = time.Now().UTC()
 
 	toFloat64 := func(value interface{}) (float64, bool) {
-		switch typed := value.(type) {
+		switch v := value.(type) {
 		case float64:
-			return typed, true
-		case float32:
-			return float64(typed), true
+			return v, true
 		case int:
-			return float64(typed), true
-		case int8:
-			return float64(typed), true
-		case int16:
-			return float64(typed), true
-		case int32:
-			return float64(typed), true
+			return float64(v), true
 		case int64:
-			return float64(typed), true
-		case uint:
-			return float64(typed), true
-		case uint8:
-			return float64(typed), true
-		case uint16:
-			return float64(typed), true
-		case uint32:
-			return float64(typed), true
-		case uint64:
-			return float64(typed), true
-		case json.Number:
-			parsed, err := typed.Float64()
-			if err != nil {
-				return 0, false
-			}
-			return parsed, true
+			return float64(v), true
 		default:
 			return 0, false
 		}
 	}
 
-	checkOptionalInt := func(name, key string, maxValue float64) error {
-		value, exists := update[key]
-		if !exists || value == nil {
-			return nil
+	if memTotal, exists := update["mem_total"]; exists {
+		if val, ok := toFloat64(memTotal); ok {
+			if val < 0 || val > math.MaxInt64-1 {
+				return fmt.Errorf("invalid mem_total: %v", memTotal)
+			}
 		}
-
-		numericValue, ok := toFloat64(value)
-		if !ok {
-			return fmt.Errorf("%s must be a valid number", name)
-		}
-		if numericValue < 0 || numericValue > maxValue {
-			return fmt.Errorf("%s must be a valid non-negative number: %v", name, value)
-		}
-		return nil
 	}
 
-	verify := func(update map[string]interface{}) error {
-		if err := checkOptionalInt("Cpu.Cores", "cpu_cores", math.MaxInt-1); err != nil {
-			return err
+	if swapTotal, exists := update["swap_total"]; exists {
+		if val, ok := toFloat64(swapTotal); ok {
+			if val < 0 || val > math.MaxInt64-1 {
+				return fmt.Errorf("invalid swap_total: %v", swapTotal)
+			}
 		}
-		if err := checkOptionalInt("Cpu.PhysicalCores", "cpu_physical_cores", math.MaxInt-1); err != nil {
-			return err
-		}
-		if err := checkOptionalInt("Ram.Total", "mem_total", math.MaxInt64-1); err != nil {
-			return err
-		}
-		if err := checkOptionalInt("Swap.Total", "swap_total", math.MaxInt64-1); err != nil {
-			return err
-		}
-		if err := checkOptionalInt("Disk.Total", "disk_total", math.MaxInt64-1); err != nil {
-			return err
-		}
-		return nil
 	}
 
-	if err := verify(update); err != nil {
-		return err
+	if diskTotal, exists := update["disk_total"]; exists {
+		if val, ok := toFloat64(diskTotal); ok {
+			if val < 0 || val > math.MaxInt64-1 {
+				return fmt.Errorf("invalid disk_total: %v", diskTotal)
+			}
+		}
 	}
 
-	err := db.Model(&models.Client{}).Where("uuid = ?", clientUUID).Updates(update).Error
-	if err != nil {
+	if cpuCores, exists := update["cpu_cores"]; exists {
+		if val, ok := cpuCores.(int); ok {
+			if val < 0 || val > math.MaxInt32-1 {
+				return fmt.Errorf("invalid cpu_cores: %v", cpuCores)
+			}
+		}
+	}
+
+	if cpuPhysicalCores, exists := update["cpu_physical_cores"]; exists {
+		if val, ok := cpuPhysicalCores.(int); ok {
+			if val < 0 || val > math.MaxInt32-1 {
+				return fmt.Errorf("invalid cpu_physical_cores: %v", cpuPhysicalCores)
+			}
+		}
+	}
+
+	if gpuCount, exists := update["gpu_count"]; exists {
+		if val, ok := gpuCount.(int); ok {
+			if val < 0 || val > math.MaxInt32-1 {
+				return fmt.Errorf("invalid gpu_count: %v", gpuCount)
+			}
+		}
+	}
+
+	if err := db.Model(&models.Client{}).Where("uuid = ?", clientUUID).Updates(update).Error; err != nil {
 		return err
 	}
 	basicInfoFingerprints.Store(clientUUID, fp)
@@ -151,87 +123,64 @@ func SaveClientInfo(update map[string]interface{}) error {
 // CreateClient 创建新客户端
 func CreateClient() (clientUUID, token string, err error) {
 	db := dbcore.GetDBInstance()
-	token = utils.GenerateToken()
 	clientUUID = uuid.New().String()
+	token = uuid.New().String()
 
 	client := models.Client{
 		UUID:      clientUUID,
 		Token:     token,
-		Name:      "client_" + clientUUID[0:8],
-		CreatedAt: time.Now().UTC(),
 		UpdatedAt: time.Now().UTC(),
 	}
 
-	err = db.Create(&client).Error
-	if err != nil {
+	if err := db.Create(&client).Error; err != nil {
 		return "", "", err
 	}
 	if err := tasks.AddDefaultOnClientUUID(clientUUID); err != nil {
-		logger.ErrorArgs("clients", "Failed to apply default-on ping tasks to new client:", err)
+		logger.Error("client", "failed to add default tasks on client creation", "error", err, "client", clientUUID)
 	}
 	return clientUUID, token, nil
 }
 
 func CreateClientWithName(name string) (clientUUID, token string, err error) {
-	if name == "" {
-		return CreateClient()
-	}
 	db := dbcore.GetDBInstance()
-	token = utils.GenerateToken()
 	clientUUID = uuid.New().String()
+	token = uuid.New().String()
+
 	client := models.Client{
 		UUID:      clientUUID,
-		Token:     token,
 		Name:      name,
-		CreatedAt: time.Now().UTC(),
+		Token:     token,
 		UpdatedAt: time.Now().UTC(),
 	}
 
-	err = db.Create(&client).Error
-	if err != nil {
+	if err := db.Create(&client).Error; err != nil {
 		return "", "", err
 	}
 	if err := tasks.AddDefaultOnClientUUID(clientUUID); err != nil {
-		logger.ErrorArgs("clients", "Failed to apply default-on ping tasks to new client:", err)
+		logger.Error("client", "failed to add default tasks on client creation", "error", err, "client", clientUUID)
 	}
 	return clientUUID, token, nil
 }
 
-/*
-// GetAllClients 获取所有客户端配置
-
-	func getAllClients() (clients []models.Client, err error) {
-		db := dbcore.GetDBInstance()
-		err = db.Find(&clients).Error
-		if err != nil {
-			return nil, err
-		}
-		return clients, nil
-	}
-*/
-func GetClientByUUID(uuid string) (client models.Client, err error) {
-	db := dbcore.GetDBInstance()
-	err = db.Where("uuid = ?", uuid).First(&client).Error
-	if err != nil {
+func GetClientByUUID(uuid string) (models.Client, error) {
+	var client models.Client
+	if err := dbcore.GetDBInstance().Where("uuid = ?", uuid).First(&client).Error; err != nil {
 		return models.Client{}, err
 	}
 	return client, nil
 }
 
-func GetClientTokenByUUID(uuid string) (token string, err error) {
-	db := dbcore.GetDBInstance()
+func GetClientTokenByUUID(uuid string) (string, error) {
 	var client models.Client
-	err = db.Where("uuid = ?", uuid).First(&client).Error
-	if err != nil {
+	if err := dbcore.GetDBInstance().Where("uuid = ?", uuid).First(&client).Error; err != nil {
 		return "", err
 	}
 	return client.Token, nil
 }
 
-func GetAllClientBasicInfo() (clients []models.Client, err error) {
-	db := dbcore.GetDBInstance()
-	err = db.Find(&clients).Error
-	if err != nil {
+func GetAllClientBasicInfo() ([]models.Client, error) {
+	var clients []models.Client
+	if err := dbcore.GetDBInstance().Find(&clients).Error; err != nil {
 		return nil, err
 	}
 	return clients, nil
@@ -244,46 +193,39 @@ func SaveClient(updates map[string]interface{}) error {
 		return fmt.Errorf("invalid client UUID")
 	}
 
-	// 确保更新的字段不为空
-	if len(updates) == 0 {
-		return fmt.Errorf("no fields to update")
-	}
-
 	if v, exists := updates["traffic_limit"]; exists {
 		if val, ok := v.(float64); ok {
 			if val < 0 || val > math.MaxInt64-1 {
-				return fmt.Errorf("traffic_limit must be a valid non-negative int64 value, got %v", val)
+				return fmt.Errorf("invalid traffic_limit: %v", val)
 			}
 		}
 	}
-	if value, exists := updates["expired_at"]; exists {
-		switch typed := value.(type) {
-		case nil:
-			updates["expired_at"] = nil
-		case time.Time:
-			updates["expired_at"] = typed.UTC()
-		case *time.Time:
-			if typed == nil {
-				updates["expired_at"] = nil
-			} else {
-				updates["expired_at"] = typed.UTC()
+
+	if v, exists := updates["billing_cycle"]; exists {
+		if val, ok := v.(int); ok {
+			if val < 0 || val > math.MaxInt32-1 {
+				return fmt.Errorf("invalid billing_cycle: %v", val)
 			}
-		case string:
-			stamp, err := time.Parse(time.RFC3339Nano, typed)
-			if err != nil {
-				return fmt.Errorf("expired_at must be an RFC3339 timestamp with a timezone: %w", err)
+		}
+	}
+
+	if v, exists := updates["group"]; exists {
+		if val, ok := v.(string); ok {
+			if len(val) > 255 {
+				return fmt.Errorf("invalid group: %v", val)
 			}
-			updates["expired_at"] = stamp.UTC()
-		default:
-			return fmt.Errorf("expired_at must be an RFC3339 timestamp with a timezone")
+		}
+	}
+
+	if v, exists := updates["weight"]; exists {
+		if val, ok := v.(int); ok {
+			if val < 0 || val > math.MaxInt32-1 {
+				return fmt.Errorf("invalid weight: %v", val)
+			}
 		}
 	}
 
 	updates["updated_at"] = time.Now().UTC()
 
-	err := db.Model(&models.Client{}).Where("uuid = ?", clientUUID).Updates(updates).Error
-	if err != nil {
-		return err
-	}
-	return nil
+	return db.Model(&models.Client{}).Where("uuid = ?", clientUUID).Updates(updates).Error
 }

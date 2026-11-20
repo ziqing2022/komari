@@ -3,6 +3,7 @@ package public
 import (
 	"fmt"
 	"slices"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/komari-monitor/komari/database/accounts"
@@ -37,27 +38,16 @@ func OAuthCallback(c *gin.Context) {
 	// 获取当前OAuth提供商名称
 	providerName := oauth.CurrentProvider().GetName()
 
-	providersSkipStateCheck := []string{"qq"}
-	if slices.Contains(providersSkipStateCheck, providerName) {
-		// 对于QQ登录，由于是通过QQ聚合登录平台中转，state可能会不匹配
-		// 但我们仍然需要验证state的存在性（不能是空的）
-		if state == "" {
-			c.JSON(400, gin.H{"status": "error", "error": "Invalid state"})
-			return
-		}
-	} else {
-		// 对于其他提供商，严格验证state匹配
-		if state == "" || state != c.Query("state") {
-			c.JSON(400, gin.H{"status": "error", "error": "Invalid state"})
-			return
-		}
+	// QQ 经聚合平台中转，state 可能不匹配，只校验非空；其他提供商严格校验匹配
+	skipStateMatch := slices.Contains([]string{"qq"}, providerName)
+	if state == "" || (!skipStateMatch && state != c.Query("state")) {
+		c.JSON(400, gin.H{"status": "error", "error": "Invalid state"})
+		return
 	}
 
 	queries := make(map[string]string)
 	for key, values := range c.Request.URL.Query() {
-		if len(values) > 0 {
-			queries[key] = values[0]
-		}
+		queries[key] = values[0]
 	}
 	oidcUser, err := oauth.CurrentProvider().OnCallback(c, state, queries, utils.GetCallbackURL(c))
 	if err != nil {
@@ -66,7 +56,7 @@ func OAuthCallback(c *gin.Context) {
 	}
 
 	// ID作为SSO ID
-	sso_id := fmt.Sprintf("%s_%s", oauth.CurrentProvider().GetName(), oidcUser.UserId)
+	sso_id := fmt.Sprintf("%s_%s", providerName, oidcUser.UserId)
 
 	// 如果cookie中有binding_external_account，说明是绑定外部账号
 	// 否则是登录
@@ -80,12 +70,16 @@ func OAuthCallback(c *gin.Context) {
 			c.JSON(500, gin.H{"status": "error", "message": "Binding failed"})
 			return
 		}
-		err = accounts.BindingExternalAccount(user.UUID, sso_id)
-		if err != nil {
+		if err := accounts.BindingExternalAccount(user.UUID, sso_id); err != nil {
 			c.JSON(500, gin.H{"status": "error", "message": "Binding failed"})
 			return
 		}
-		auditlog.Log(c.ClientIP(), user.UUID, "bound external account (OAuth)"+fmt.Sprintf(",sso_id: %s", sso_id), "login")
+		auditlog.Log(
+			c.ClientIP(),
+			user.UUID,
+			fmt.Sprintf("Bound external account (OAuth): user=%s, provider=%s, sso_id=%s", auditlog.FormatUser(user.Username, user.UUID), providerName, sso_id),
+			"login",
+		)
 		c.Redirect(302, "/admin/dashboard")
 		return
 	}
@@ -93,6 +87,12 @@ func OAuthCallback(c *gin.Context) {
 	// 尝试获取用户
 	user, err := accounts.GetUserBySSO(sso_id)
 	if err != nil {
+		auditlog.Log(
+			c.ClientIP(),
+			"",
+			fmt.Sprintf("OAuth login failed: provider=%s, sso_id=%s, reason=account not bound", providerName, sso_id),
+			"warn",
+		)
 		c.JSON(401, gin.H{
 			"status":  "error",
 			"message": "please log in and bind your external account first.",
@@ -109,6 +109,11 @@ func OAuthCallback(c *gin.Context) {
 
 	// 设置cookie并返回
 	setSessionCookie(c, session, sessionCookieMaxAge)
-	auditlog.Log(c.ClientIP(), user.UUID, "logged in (OAuth)", "login")
+	ua := auditlog.Truncate(strings.TrimSpace(c.Request.UserAgent()), 160)
+	msg := fmt.Sprintf("Logged in (OAuth): user=%s, provider=%s, sso_id=%s", auditlog.FormatUser(user.Username, user.UUID), providerName, sso_id)
+	if ua != "" {
+		msg += ", ua=" + ua
+	}
+	auditlog.Log(c.ClientIP(), user.UUID, msg, "login")
 	c.Redirect(302, "/admin/dashboard")
 }

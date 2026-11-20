@@ -40,38 +40,26 @@ type cronSchedule struct {
 }
 
 func (s cronSchedule) Next(t time.Time) time.Time {
-	loc := time.Local
-	next := t.In(loc).Truncate(time.Second).Add(time.Second)
+	next := t.UTC().Truncate(time.Second).Add(time.Second)
 	limit := next.Add(366 * 24 * time.Hour)
-
 	for next.Before(limit) {
-		if _, ok := s.months[int(next.Month())]; !ok {
-			next = time.Date(next.Year(), next.Month()+1, 1, 0, 0, 0, 0, loc)
-			continue
+		if s.match(next) {
+			return next
 		}
-		if _, ok := s.dom[next.Day()]; !ok {
-			next = time.Date(next.Year(), next.Month(), next.Day()+1, 0, 0, 0, 0, loc)
-			continue
-		}
-		if _, ok := s.dow[int(next.Weekday())]; !ok {
-			next = time.Date(next.Year(), next.Month(), next.Day()+1, 0, 0, 0, 0, loc)
-			continue
-		}
-		if _, ok := s.hours[next.Hour()]; !ok {
-			next = time.Date(next.Year(), next.Month(), next.Day(), next.Hour()+1, 0, 0, 0, loc)
-			continue
-		}
-		if _, ok := s.minutes[next.Minute()]; !ok {
-			next = time.Date(next.Year(), next.Month(), next.Day(), next.Hour(), next.Minute()+1, 0, 0, loc)
-			continue
-		}
-		if _, ok := s.seconds[next.Second()]; !ok {
-			next = next.Add(time.Second)
-			continue
-		}
-		return next.UTC()
+		next = next.Add(time.Second)
 	}
 	return time.Time{}
+}
+
+func (s cronSchedule) match(t time.Time) bool {
+	t = t.In(time.Local)
+	_, okSecond := s.seconds[t.Second()]
+	_, okMinute := s.minutes[t.Minute()]
+	_, okHour := s.hours[t.Hour()]
+	_, okDay := s.dom[t.Day()]
+	_, okMonth := s.months[int(t.Month())]
+	_, okWeek := s.dow[int(t.Weekday())]
+	return okSecond && okMinute && okHour && okDay && okMonth && okWeek
 }
 
 type Manager struct {

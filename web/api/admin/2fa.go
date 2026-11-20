@@ -5,6 +5,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/komari-monitor/komari/database/accounts"
+	"github.com/komari-monitor/komari/database/auditlog"
 	"github.com/komari-monitor/komari/web/api"
 	"github.com/pquerna/otp/totp"
 )
@@ -19,13 +20,6 @@ func Generate2FA(c *gin.Context) {
 	c.Header("Content-Type", "image/png")
 	c.Writer.WriteHeader(200)
 	png.Encode(c.Writer, img)
-}
-
-func Get2FAInfo(c *gin.Context) {
-	secret, _ := c.Cookie("2fa_secret")
-	api.RespondSuccess(c, gin.H{
-		"pending_secret": secret,
-	})
 }
 
 func Enable2FA(c *gin.Context) {
@@ -46,6 +40,8 @@ func Enable2FA(c *gin.Context) {
 		return
 	}
 	c.SetCookie("2fa_secret", "", -1, "/", "", false, true)
+	actor := c.GetString("uuid")
+	auditlog.Log(c.ClientIP(), actor, "2FA enabled: user="+auditlog.FormatUserUUID(actor), "warn")
 
 	api.RespondSuccess(c, "2FA enabled successfully")
 }
@@ -57,13 +53,7 @@ func Disable2FA(c *gin.Context) {
 		api.RespondError(c, 500, "Failed to disable 2FA: "+err.Error())
 		return
 	}
+	actor := c.GetString("uuid")
+	auditlog.Log(c.ClientIP(), actor, "2FA disabled: user="+auditlog.FormatUserUUID(actor), "warn")
 	api.RespondSuccess(c, "")
-}
-
-func Verify2FA(c *gin.Context) {
-	if err := api.VerifySensitive2FA(c); err != nil {
-		api.RespondError(c, 401, err.Error())
-		return
-	}
-	api.RespondSuccess(c, gin.H{"verified": true})
 }

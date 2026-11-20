@@ -3,12 +3,10 @@ import { Navigate, Outlet, useLocation, useNavigate } from "react-router-dom";
 import AdminPanelBar from "../../components/admin/AdminPanelBar";
 import { AdminNavigationProvider } from "@/contexts/AdminNavigationContext";
 import { AccountProvider } from "@/contexts/AccountContext";
-import { LiveDataProvider } from "@/contexts/LiveDataContext";
 import { updateSettingsWithToast, useSettings } from "@/lib/api";
-import { Button, Dialog } from "@radix-ui/themes";
+import { Button, Dialog, Flex } from "@radix-ui/themes";
 import NotificationUpgradeNotice from "@/components/admin/NotificationUpgradeNotice";
 import { useEffect, useState } from "react";
-import { getEula } from "@/utils/eula";
 import { normalizeLanguage, readStoredLanguage } from "@/utils/language";
 import { useTranslation } from "react-i18next";
 import { useAccount } from "@/contexts/AccountContext";
@@ -20,11 +18,11 @@ const AdminLayout = () => {
   const { settings, loading, error, setSettings } = useSettings();
   const lang = readStoredLanguage() || "en";
   const [open, setOpen] = useState(false);
+  const [eulaText, setEulaText] = useState<string>("");
   const [noticePending, setNoticePending] = useState(true);
   const eulaPending =
     normalizeLanguage(lang).startsWith("zh") && settings?.eula_accepted === false;
   const noticesReady = !loading && !error && !open && !eulaPending;
-
   useEffect(() => {
     if (loading || error || !settings || settings.eula_accepted !== false) {
       setOpen(false);
@@ -34,48 +32,60 @@ const AdminLayout = () => {
       setOpen(true);
     }
   }, [loading, error, settings, lang]);
-
+  useEffect(() => {
+    if (!open) return;
+    let active = true;
+    void import("@/utils/eula").then(({ getEula }) => {
+      if (active) setEulaText(getEula(i18n.language));
+    });
+    return () => {
+      active = false;
+    };
+  }, [open, i18n.language]);
   return (
-    <LiveDataProvider>
+    <>
       <Dialog.Root open={open}>
+        {/* 原先 Dialog.Content 里又套了一层 Dialog.Content（两层面板/遮罩），合并为一层 */}
         <Dialog.Content className="km-admin-eula-dialog">
-          <Dialog.Content>
-            <Dialog.Title>{t("eula.title")}</Dialog.Title>
-            <div className="km-admin-eula-content flex flex-col gap-2">
-              <div className="max-h-[70vh] overflow-y-auto space-y-4">
-                <pre className="text-wrap">{getEula(i18n.language)}</pre>
-              </div>
-              <div className="flex flex-row gap-2 justify-end items-center">
-                <Button
-                  variant="soft"
-                  color="red"
-                  onClick={() => window.close()}
-                >
-                  {t("eula.reject")}
-                </Button>
-                <Button
-                  variant="solid"
-                  onClick={async () => {
-                    try {
-                      await updateSettingsWithToast(
-                        { eula_accepted: true },
-                        (key) => key
-                      );
-                      setSettings((prev) => ({
-                        ...prev,
-                        eula_accepted: true,
-                      }));
-                      setOpen(false);
-                    } catch {
-                      setOpen(true);
-                    }
-                  }}
-                >
-                  {t("eula.accept")}
-                </Button>
-              </div>
+          <Dialog.Title>{t("eula.title")}</Dialog.Title>
+          <div className="km-admin-eula-content">
+            <div className="max-h-[70vh] overflow-y-auto">
+              {eulaText ? (
+                <pre className="text-wrap">{eulaText}</pre>
+              ) : (
+                <Loading reveal={false} />
+              )}
             </div>
-          </Dialog.Content>
+            <Flex gap="2" justify="end" align="center" mt="5">
+              <Button
+                variant="soft"
+                color="red"
+                onClick={() => window.close()}
+              >
+                {t("eula.reject")}
+              </Button>
+              <Button
+                variant="solid"
+                onClick={async () => {
+                  try {
+                    await updateSettingsWithToast(
+                      { eula_accepted: true },
+                      (key) => key
+                    );
+                    setSettings((prev) => ({
+                      ...prev,
+                      eula_accepted: true,
+                    }));
+                    setOpen(false);
+                  } catch {
+                    setOpen(true);
+                  }
+                }}
+              >
+                {t("eula.accept")}
+              </Button>
+            </Flex>
+          </div>
         </Dialog.Content>
       </Dialog.Root>
       <NotificationUpgradeNotice
@@ -85,10 +95,12 @@ const AdminLayout = () => {
       <AdminNavigationProvider>
         <AdminPanelBar
           content={<Outlet />}
-          onboardingReady={noticesReady && !noticePending}
+          onboardingReady={
+            noticesReady && !noticePending
+          }
         />
       </AdminNavigationProvider>
-    </LiveDataProvider>
+    </>
   );
 };
 

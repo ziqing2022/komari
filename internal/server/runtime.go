@@ -7,23 +7,19 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"sync"
 	"syscall"
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/komari-monitor/komari/cmd/flags"
 	"github.com/komari-monitor/komari/database"
 	"github.com/komari-monitor/komari/database/accounts"
 	"github.com/komari-monitor/komari/database/auditlog"
-	"github.com/komari-monitor/komari/database/dbcore"
 	"github.com/komari-monitor/komari/database/tasks"
 	"github.com/komari-monitor/komari/internal/config"
 	"github.com/komari-monitor/komari/internal/lifecycle"
 	"github.com/komari-monitor/komari/internal/metricstore"
 	"github.com/komari-monitor/komari/internal/plugin"
 	"github.com/komari-monitor/komari/internal/scheduler"
-	"github.com/komari-monitor/komari/utils"
 	"github.com/komari-monitor/komari/utils/geoip"
 	logger "github.com/komari-monitor/komari/utils/log"
 	"github.com/komari-monitor/komari/utils/notifier"
@@ -69,7 +65,7 @@ func (a *App) registerReloadHandlers(cors *security.CorsController) {
 			}
 			logger.Infof("server", "Using %s as OIDC provider", oidcProvider.Name)
 			if err := oauth.LoadProvider(oidcProvider.Name, oidcProvider.Addition); err != nil {
-				auditlog.EventLog("error", fmt.Sprintf("Failed to load OIDC provider: %v", err))
+				auditlog.EventLog("error", fmt.Sprintf("Failed to load OIDC provider: provider=%s, error=%v", oidcProvider.Name, err))
 			}
 		}
 	})
@@ -131,19 +127,27 @@ func (a *App) Run() error {
 		return fmt.Errorf("listen: %w", err)
 	case reason := <-lifecycle.RestartRequests():
 		logger.Infof("server", "Restarting service for %s", reason)
-		if err := a.Shutdown(); err != nil {
+		if err := a.shutdownWithReason("restart: " + string(reason)); err != nil {
 			logger.Errorf("server", "Cleanup before restart failed: %v", err)
 		}
 		return fmt.Errorf("%w: %s", ErrRestartRequested, reason)
 	case <-quit:
-		return a.Shutdown()
+		return a.shutdownWithReason("signal")
 	}
 }
 
 // Shutdown stops HTTP first, then releases registered resources in LIFO order.
 func (a *App) Shutdown() error {
+	return a.shutdownWithReason("")
+}
+
+func (a *App) shutdownWithReason(reason string) error {
 	if a.dbReady {
-		auditlog.Log("", "", "server is shutting down", "info")
+		msg := fmt.Sprintf("Server shutting down: addr=%s", a.listenAddr)
+		if reason != "" {
+			msg += ", reason=" + reason
+		}
+		auditlog.Log("", "", msg, "info")
 	}
 	httpCtx, cancelHTTP := context.WithTimeout(context.Background(), httpShutdownTimeout)
 	defer cancelHTTP()
@@ -160,7 +164,7 @@ func (a *App) Shutdown() error {
 
 func (a *App) onFatal(err error) {
 	if a.dbReady {
-		auditlog.Log("", "", "server encountered a fatal error: "+err.Error(), "error")
+		auditlog.Log("", "", fmt.Sprintf("Server encountered a fatal error: addr=%s, error=%v", a.listenAddr, err), "error")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), resourceCleanupTimeout)
 	defer cancel()
@@ -182,12 +186,8 @@ func (a *App) runCleanups(ctx context.Context) error {
 }
 
 func registerScheduledWork() {
-	utils.OnCronFailure = notifier.NotifyCronFailure
 	if err := tasks.ReloadPingSchedule(); err != nil {
 		logger.ErrorArgs("server", "Failed to reload ping schedule:", err)
-	}
-	if err := utils.ReloadCronSchedule(); err != nil {
-		logger.ErrorArgs("server", "Failed to reload cron schedule:", err)
 	}
 	if err := scheduler.AddFunc("records:cleanup", "@every 30m", cleanupScheduledData); err != nil {
 		logger.ErrorArgs("server", "Failed to add cleanup scheduled task:", err)
@@ -201,88 +201,20 @@ func registerScheduledWork() {
 	if err := scheduler.AddFunc("notifier:traffic", "@every 1m", notifier.CheckTraffic); err != nil {
 		logger.ErrorArgs("server", "Failed to add traffic notification task:", err)
 	}
-	if err := scheduler.AddFunc("notifier:expire", "0 0 9 * * *", notifier.CheckExpireScheduledWork); err != nil {
+	if err := scheduler.AddFunc("notifier:expire", "0 0 9 * * *", notifier.CheckExpire); err != nil {
 		logger.ErrorArgs("server", "Failed to add expire notification task:", err)
 	}
-	// 每天凌晨 03:30 执行一次主数据库自动瘦身与空间回收（VACUUM）
-	if err := scheduler.AddContextFunc("database:maintenance", "0 30 3 * * *", true, scheduledDatabaseMaintenance); err != nil {
-		logger.ErrorArgs("server", "Failed to add database maintenance scheduled task:", err)
-	}
-
-	// 启动后异步检查：若数据库达到高水位（如升级或历史遗留的数十至数百 MB），自动执行一次自愈清理与压缩
-	go func() {
-		time.Sleep(10 * time.Second)
-		_ = tasks.CleanCronTaskHistory(2) // 启动后立即裁剪定时任务日志至近2次，杜绝历史积压爆库
-		if flags.IsSQLite() {
-			if size, err := dbcore.StorageSize(); err == nil && size > 80*1024*1024 {
-				logger.Infof("server", "[db-maintenance] Database size is %.2f MB (>80MB threshold), automatically triggering initial space reclamation", float64(size)/(1024*1024))
-				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
-				defer cancel()
-				scheduledDatabaseMaintenance(ctx)
-			}
-		}
-	}()
 }
 
-var (
-	lastAutoVacuumTime time.Time
-	autoVacuumMu       sync.Mutex
-)
-
-// scheduledDatabaseMaintenance 执行主数据库清理、旧表删除与物理磁盘空间回收 (VACUUM)
-func scheduledDatabaseMaintenance(ctx context.Context) {
-	autoVacuumMu.Lock()
-	defer autoVacuumMu.Unlock()
-
-	logger.Infof("server", "[db-maintenance] Starting scheduled database cleanup and vacuum...")
-	cleanupScheduledData()
-
-	if flags.IsSQLite() {
-		beforeSize, _ := dbcore.StorageSize()
-		if err := dbcore.ReclaimSpace(ctx); err != nil {
-			logger.Errorf("server", "[db-maintenance] Failed to reclaim database space: %v", err)
-			return
-		}
-		afterSize, _ := dbcore.StorageSize()
-		lastAutoVacuumTime = time.Now().UTC()
-		logger.Infof("server", "[db-maintenance] Database maintenance completed: before %.2f MB, after %.2f MB (freed %.2f MB)",
-			float64(beforeSize)/(1024*1024),
-			float64(afterSize)/(1024*1024),
-			float64(beforeSize-afterSize)/(1024*1024))
-	}
-}
+const taskResultRetentionDays = 30
 
 func cleanupScheduledData() {
-	// 1. 自动删除遗留旧表（如旧版残留的监控历史大表，新版已全部走 metrics.db）
-	dbcore.DropLegacyTablesIfExist()
-
-	// 2. 清理过期与超出批次上限的定时任务日志（默认保留7天、最多2批次）
-	retentionDays := 7
-	if customDays, err := config.GetAs[int]("task_retention_days", 7); err == nil && customDays > 0 {
-		retentionDays = customDays
-	}
-	before := time.Now().UTC().Add(-24 * time.Hour * time.Duration(retentionDays))
+	before := time.Now().UTC().Add(-24 * time.Hour * taskResultRetentionDays)
 	if err := tasks.ClearTaskResultsByTimeBefore(before); err != nil {
 		logger.Errorf("server", "Failed to clean expired task results: %v", err)
 	}
-	_ = tasks.CleanCronTaskHistory(2)
-
-	// 3. 清理审计日志与过期会话
 	auditlog.RemoveOldLogs()
 	accounts.RemoveExpiredSessions()
-
-	// 4. 高水位空间自愈：如果主数据库超过 80MB，且距离上次 VACUUM 超过 6 小时，自动在后台触发空间回收
-	if flags.IsSQLite() {
-		if size, err := dbcore.StorageSize(); err == nil && size > 80*1024*1024 {
-			if time.Since(lastAutoVacuumTime) > 6*time.Hour {
-				go func() {
-					ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
-					defer cancel()
-					scheduledDatabaseMaintenance(ctx)
-				}()
-			}
-		}
-	}
 }
 
 func compactMetricStore(ctx context.Context) {

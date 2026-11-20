@@ -1,45 +1,59 @@
+import type { TFunction } from "i18next";
+
+// 数值部分：仅接受整数/小数的数字字面量（如 1000、1.5、.5）
+const SIZE_NUMBER_PATTERN = /^(?:\d+(?:\.\d*)?|\.\d+)$/;
+
 /**
- * 将表示数据大小的字符串（如 '1.5MB', '128*1024gb'）转换为字节数。
+ * 将表示数据大小的字符串（如 '1.5GB'、'512 MiB'、'2t'）转换为字节数。
+ * 语法为「数字 + 可选单位」：数字支持整数和小数；单位大小写不敏感，
+ * 支持 G / GB / GiB 形式（B/Byte(s)、K/KB/KiB、M/MB/MiB、G/GB/GiB、T/TB/TiB、P/PB/PiB，最大单位 PB）。
+ * 仅输入数字时按字节处理；仅输入单位（如 'kb'）视为 1 个单位。
+ * 不使用 eval / Function，兼容严格 CSP（无 'unsafe-eval'）。
  * @param str - 输入的字符串。
- * @returns - 计算出的字节数（number）。如果无法解析，则返回 0。
+ * @returns - 计算出的字节数（number）；空字符串返回 0（表示"无限制"）；无法解析返回 null。
  * @example
  * stringToBytes('1MB');        // 1048576
- * stringToBytes('1 MB');        // 1048576
- * stringToBytes('5.4MB');      // 5662310.4
- * stringToBytes('6,222,765 MB'); // 6525139624935
- * stringToBytes('128*1024gb'); // 140737488355328
- * stringToBytes('1e3kb');       // 1024000 (1000 * 1024)
- * stringToBytes('0.2gb');       // 214748364.8
- * stringToBytes('1024');        // 1024 (默认为字节)
- * stringToBytes('1tb');         // 1099511627776
+ * stringToBytes('1 MB');       // 1048576
+ * stringToBytes('5.4MB');      // 5662310
+ * stringToBytes('1.5 GiB');    // 1610612736
+ * stringToBytes('2t');         // 2199023255552
+ * stringToBytes('1024');       // 1024 (默认为字节)
+ * stringToBytes('kb');         // 1024 (等价于 1 KB)
+ * stringToBytes('');           // 0 (无限制)
+ * stringToBytes('abc');        // null (无法解析)
  */
-export function stringToBytes(str: string): number {
-  if (typeof str !== "string" || str.length === 0) {
+export function stringToBytes(str: string): number | null {
+  if (typeof str !== "string" || str.trim() === "") {
     return 0;
   }
-  // 定义单位和它们的字节倍数 (使用 1024 为基数)
+  // 定义单位和它们的字节倍数 (使用 1024 为基数，最大单位 PB)
   const units: { [key: string]: number } = {
     b: 1,
     byte: 1,
     bytes: 1,
     k: 1024,
     kb: 1024,
+    ki: 1024,
     kib: 1024,
     kilobyte: 1024,
     m: 1024 ** 2,
     mb: 1024 ** 2,
+    mi: 1024 ** 2,
     mib: 1024 ** 2,
     megabyte: 1024 ** 2,
     g: 1024 ** 3,
     gb: 1024 ** 3,
+    gi: 1024 ** 3,
     gib: 1024 ** 3,
     gigabyte: 1024 ** 3,
     t: 1024 ** 4,
     tb: 1024 ** 4,
+    ti: 1024 ** 4,
     tib: 1024 ** 4,
     terabyte: 1024 ** 4,
     p: 1024 ** 5,
     pb: 1024 ** 5,
+    pi: 1024 ** 5,
     pib: 1024 ** 5,
     petabyte: 1024 ** 5,
   };
@@ -67,24 +81,18 @@ export function stringToBytes(str: string): number {
     numericPart = "1";
   }
 
-  try {
-    // 3. 计算数值部分
-    // 使用 Function 构造函数来安全地评估可能包含乘法或科学记数法的表达式
-    // 注意：这仍然假设输入源是可信的，因为它能执行简单的数学运算
-    const value = new Function(`return ${numericPart}`)();
-
-    if (isNaN(value)) {
-      return 0;
-    }
-
-    // 4. 乘以单位对应的倍数
-    const multiplier = units[unit];
-    return Math.round(value * multiplier);
-  } catch (error) {
-    // 如果表达式无效（例如 "abc-gb"），则捕获错误并返回 0
-    console.error(`Error parsing string "${str}":`, error);
-    return 0;
+  // 3. 解析数值部分：仅接受数字字面量，不执行任何代码
+  if (!SIZE_NUMBER_PATTERN.test(numericPart)) {
+    return null;
   }
+  const value = Number(numericPart);
+  if (!Number.isFinite(value)) {
+    return null;
+  }
+
+  // 4. 乘以单位对应的倍数
+  const result = Math.round(value * units[unit]);
+  return Number.isFinite(result) ? result : null;
 }
 
 export function formatBytes(bytes: number): string {
@@ -108,4 +116,32 @@ export function formatBytes(bytes: number): string {
     // 小于等于两位数，显示2位小数
     return `${size.toFixed(2)} ${units[unitIndex]}`;
   }
+}
+
+/** 把秒数格式化为「x 天 x 小时 x 分 x 秒」 */
+export function formatUptime(seconds: number, t: TFunction): string {
+  if (!seconds || seconds < 0) return t("nodeCard.time_second", { val: 0 });
+  const d = Math.floor(seconds / 86400);
+  const h = Math.floor((seconds % 86400) / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = Math.floor(seconds % 60);
+  const parts = [];
+  if (d) parts.push(`${d} ${t("nodeCard.time_day")}`);
+  if (h) parts.push(`${h} ${t("nodeCard.time_hour")}`);
+  if (m) parts.push(`${m} ${t("nodeCard.time_minute")}`);
+  if (s || parts.length === 0) parts.push(`${s} ${t("nodeCard.time_second")}`);
+  return parts.join(" ");
+}
+
+/** 速率格式化（字节/秒）：B、KB 不带小数，GB 以上 1 位小数，数值 ≥100 时不带小数 */
+export function formatSpeed(bytes: number): string {
+  if (bytes === 0) return "0 B/s";
+  const units = ["B/s", "KB/s", "MB/s", "GB/s", "TB/s"];
+  const i = Math.floor(Math.log(bytes) / Math.log(1024));
+  const size = bytes / Math.pow(1024, i);
+  let decimals = 2;
+  if (i >= 3) decimals = 1;
+  if (i <= 1) decimals = 0;
+  if (size >= 100) decimals = 0;
+  return `${size.toFixed(decimals)} ${units[i]}`;
 }

@@ -2,6 +2,7 @@ package client
 
 import (
 	"github.com/gin-gonic/gin"
+	"github.com/komari-monitor/komari/database/auditlog"
 	"github.com/komari-monitor/komari/database/clients"
 	"github.com/komari-monitor/komari/internal/config"
 	"github.com/komari-monitor/komari/utils"
@@ -10,19 +11,12 @@ import (
 
 func RegisterClient(c *gin.Context) {
 	auth := c.GetHeader("Authorization")
-	if auth == "" {
-		api.RespondError(c, 403, "Invalid AutoDiscovery Key")
-		return
-	}
 	AutoDiscoveryKey, err := config.GetAs[string](config.AutoDiscoveryKeyKey, "")
 	if err != nil {
 		api.RespondError(c, 500, "Failed to get AutoDiscovery Key: "+err.Error())
 		return
 	}
-	if AutoDiscoveryKey == "" ||
-		len(AutoDiscoveryKey) < 12 ||
-		"Bearer "+AutoDiscoveryKey != auth {
-
+	if len(AutoDiscoveryKey) < 12 || "Bearer "+AutoDiscoveryKey != auth {
 		api.RespondError(c, 403, "Invalid AutoDiscovery Key")
 		return
 	}
@@ -36,5 +30,6 @@ func RegisterClient(c *gin.Context) {
 		api.RespondError(c, 500, "Failed to create client: "+err.Error())
 		return
 	}
+	auditlog.Log(c.ClientIP(), "", "Auto-registered client: "+auditlog.FormatClient(name, uuid), "info")
 	api.RespondSuccess(c, gin.H{"uuid": uuid, "token": token})
 }

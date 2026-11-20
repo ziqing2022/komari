@@ -591,6 +591,7 @@ const TerminalWorkspace = ({
 }: TerminalWorkspaceProps) => {
   const { t } = useTranslation();
   const { tabs, clients, terminalSettings } = stageProps;
+  const [sidebarTab, setSidebarTab] = useState<"files" | "clipboard">("files");
 
   const activeTab = useMemo(
     () => (activeTabId ? tabs.find((tab) => tab.id === activeTabId) : undefined),

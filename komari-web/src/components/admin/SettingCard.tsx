@@ -642,6 +642,7 @@ export function SettingCardLongTextInput({
   description = "",
   descriptionPlacement = "header",
   label = "",
+  placeholder = "",
   defaultValue = "",
   OnSave = () => { },
   onChange,
@@ -654,6 +655,7 @@ export function SettingCardLongTextInput({
   description?: string;
   descriptionPlacement?: "header" | "footer";
   label?: string;
+  placeholder?: string;
   defaultValue?: string;
   OnSave?: (
     value: string,
@@ -716,6 +718,7 @@ export function SettingCardLongTextInput({
         <TextArea
           className="w-full"
           resize="vertical"
+          placeholder={placeholder}
           value={value}
           onChange={handleTextAreaChange}
           ref={textAreaRef}

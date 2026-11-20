@@ -7,7 +7,7 @@ import useServerList from "./servers/useServerList";
 import EmptyNodesGuide from "./servers/EmptyNodesGuide";
 import Header from "./servers/Header";
 import NodeTable from "./servers/NodeTable";
-import { BatchOperationsBar } from "@/components/admin/NodeTable/BatchOperations";
+import { BatchOperationsBar } from "./servers/BatchOperations";
 
 const NodeDetailsPage = () => {
   return (

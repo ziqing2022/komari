@@ -46,6 +46,22 @@ func GetTaskByTaskId(taskId string) (*models.Task, error) {
 	return &task, nil
 }
 
+func GetTasksByClientId(clientId string) ([]models.Task, error) {
+	var tasks []models.Task
+	if err := dbcore.GetDBInstance().Where("clients LIKE ?", "%"+clientId+"%").Find(&tasks).Error; err != nil {
+		return nil, err
+	}
+	return tasks, nil
+}
+
+func GetSpecificTaskResult(taskId, clientId string) (*models.TaskResult, error) {
+	var result models.TaskResult
+	if err := dbcore.GetDBInstance().Where("task_id = ? AND (client = ? OR client_uuid = ?)", taskId, clientId, clientId).First(&result).Error; err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
 func GetAllTasks() ([]models.Task, error) {
 	var tasks []models.Task
 	db := dbcore.GetDBInstance()

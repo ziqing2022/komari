@@ -665,7 +665,7 @@ func (s *Store) DeleteMetric(ctx context.Context, name string) error {
 	if err := tx.Commit(); err != nil {
 		return err
 	}
-	s.invalidateDefinitionsCache()
+	s.invalidateDefinitionCache()
 	_, rawErr := s.deleteRawPoints(name, "", nil)
 	_, hotErr := s.deleteHotRollups(name, "", nil, nil)
 	_, coarseErr := s.deleteCoarseRollupsMatching(name, "", nil)
@@ -716,7 +716,7 @@ func (s *Store) UpdateMetricRetention(ctx context.Context, name string, retentio
 	if err := tx.Commit(); err != nil {
 		return Definition{}, err
 	}
-	s.invalidateDefinitionsCache()
+	s.invalidateDefinitionCache()
 	return s.GetMetric(ctx, name)
 }
 

@@ -248,7 +248,23 @@ func adminListClients(_ context.Context, _ *rpc.JsonRpcRequest) (any, *rpc.JsonR
 	if err != nil {
 		return nil, rpc.MakeError(rpc.InternalError, err.Error(), nil)
 	}
-	return cls, nil
+	onlineUUIDs := agent_runtime.GetAllOnlineUUIDs()
+	onlineSet := make(map[string]bool, len(onlineUUIDs))
+	for _, u := range onlineUUIDs {
+		onlineSet[u] = true
+	}
+	type clientWithOnline struct {
+		models.Client
+		Online bool `json:"online"`
+	}
+	out := make([]clientWithOnline, len(cls))
+	for i, c := range cls {
+		out[i] = clientWithOnline{
+			Client: c,
+			Online: onlineSet[c.UUID],
+		}
+	}
+	return out, nil
 }
 
 func adminGetClientToken(_ context.Context, req *rpc.JsonRpcRequest) (any, *rpc.JsonRpcError) {

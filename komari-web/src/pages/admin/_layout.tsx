@@ -3,6 +3,7 @@ import { Navigate, Outlet, useLocation, useNavigate } from "react-router-dom";
 import AdminPanelBar from "../../components/admin/AdminPanelBar";
 import { AdminNavigationProvider } from "@/contexts/AdminNavigationContext";
 import { AccountProvider } from "@/contexts/AccountContext";
+import { LiveDataProvider } from "@/contexts/LiveDataContext";
 import { updateSettingsWithToast, useSettings } from "@/lib/api";
 import { Button, Dialog, Flex } from "@radix-ui/themes";
 import NotificationUpgradeNotice from "@/components/admin/NotificationUpgradeNotice";
@@ -43,7 +44,7 @@ const AdminLayout = () => {
     };
   }, [open, i18n.language]);
   return (
-    <>
+    <LiveDataProvider>
       <Dialog.Root open={open}>
         {/* 原先 Dialog.Content 里又套了一层 Dialog.Content（两层面板/遮罩），合并为一层 */}
         <Dialog.Content className="km-admin-eula-dialog">
@@ -100,7 +101,7 @@ const AdminLayout = () => {
           }
         />
       </AdminNavigationProvider>
-    </>
+    </LiveDataProvider>
   );
 };
 

@@ -687,7 +687,7 @@ const CronContent = () => {
       <Card className="p-0 overflow-hidden border border-border">
         {loading && tasks.length === 0 ? (
           <div className="py-16">
-            <Loading />
+            <Loading text="" />
           </div>
         ) : tasks.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-16 text-center text-muted-foreground gap-3">
@@ -1274,7 +1274,7 @@ const CronContent = () => {
 
           <div className="flex-1 min-h-0 overflow-y-auto space-y-4 pr-1">
             {loadingLogs ? (
-              <Loading />
+              <Loading text="" />
             ) : selectedTaskLogs.length === 0 ? (
               <div className="py-8 text-center text-muted-foreground">{t("cron.noLogs", "暂无历史执行日志")}</div>
             ) : (

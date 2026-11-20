@@ -72,9 +72,19 @@ type LoadingProps = {
   /** 放在已有色卡里（Skeletonize 的提示）：只要转圈和文字，不再画卡片 */
   bare?: boolean;
   className?: string;
+  text?: string;
 };
 
-const Loading = ({ children, size, compact = false, variant, reveal, bare = false, className }: LoadingProps) => {
+const Loading = ({
+  children,
+  size,
+  compact = false,
+  variant,
+  reveal,
+  bare = false,
+  className,
+  text,
+}: LoadingProps) => {
   const { t } = useTranslation();
   const [continued] = useState(
     () => mountedLoadings > 0 || performance.now() - lastLoadingUnmount < CONTINUE_MS,
@@ -123,15 +133,29 @@ const Loading = ({ children, size, compact = false, variant, reveal, bare = fals
       <span className={compact ? "text-sm" : "text-lg font-bold"}>
         {t("loading")}
       </span>
-      <span
-        className={
-          compact
-            ? "text-xs opacity-70"
-            : "text-sm text-muted-foreground text-center"
-        }
-      >
-        {messages[messageIndex]}
-      </span>
+      {text !== undefined ? (
+        text ? (
+          <span
+            className={
+              compact
+                ? "text-xs opacity-70"
+                : "text-sm text-muted-foreground text-center"
+            }
+          >
+            {text}
+          </span>
+        ) : null
+      ) : (
+        <span
+          className={
+            compact
+              ? "text-xs opacity-70"
+              : "text-sm text-muted-foreground text-center"
+          }
+        >
+          {messages[messageIndex]}
+        </span>
+      )}
       {children}
     </span>
   );

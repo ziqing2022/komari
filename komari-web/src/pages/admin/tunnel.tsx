@@ -1022,7 +1022,7 @@ const TunnelContent = () => {
 
       {/* Content Area */}
       {loading && tunnels.length === 0 ? (
-        <Loading />
+        <Loading text="" />
       ) : filteredTunnels.length === 0 ? (
         <Card className="py-12 text-center">
           <div className="flex flex-col items-center justify-center space-y-3">

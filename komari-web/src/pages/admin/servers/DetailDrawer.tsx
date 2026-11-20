@@ -1,7 +1,8 @@
 import type { NodeDetail } from "@/contexts/NodeDetailsContext";
-import { Button, IconButton } from "@radix-ui/themes";
+import { Button, IconButton, Badge } from "@radix-ui/themes";
 import { Copy } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { useLiveData } from "@/contexts/LiveDataContext";
 import { useIsMobile } from "@/hooks/use-mobile";
 import {
   Drawer,
@@ -25,6 +26,13 @@ export default function DetailDrawer({
 }) {
   const { t } = useTranslation();
   const isMobile = useIsMobile();
+  const { live_data } = useLiveData();
+  const isOnline = Boolean(
+    (node as any)?.online ||
+    live_data?.data?.online?.some(
+      (id) => id === node.uuid || id?.toLowerCase() === node.uuid?.toLowerCase()
+    )
+  );
 
   return (
     <Drawer
@@ -34,7 +42,19 @@ export default function DetailDrawer({
     >
       <DrawerContent>
         <DrawerHeader className="gap-1">
-          <DrawerTitle>{node.name}</DrawerTitle>
+          <div className="flex items-center gap-2">
+            <span
+              className={`inline-block w-3 h-3 rounded-full flex-shrink-0 transition-all ${
+                isOnline
+                  ? "bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.8)] animate-pulse"
+                  : "bg-red-500/80"
+              }`}
+            />
+            <DrawerTitle>{node.name}</DrawerTitle>
+            <Badge color={isOnline ? "green" : "red"} variant="soft">
+              {isOnline ? t("nodeCard.online", "在线") : t("nodeCard.offline", "离线")}
+            </Badge>
+          </div>
           <DrawerDescription>
             {t("admin.nodeDetail.machineDetail", "机器详细信息")}
           </DrawerDescription>

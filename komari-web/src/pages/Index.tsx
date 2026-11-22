@@ -6,6 +6,7 @@ import {
   Popover,
   IconButton,
   Switch,
+  Button,
 } from "@radix-ui/themes";
 import { useTranslation } from "react-i18next";
 import React, { useCallback, useEffect, useMemo, Suspense } from "react";
@@ -17,9 +18,13 @@ import { formatBytes, formatSpeed } from "@/utils/unitHelper";
 import { useLiveData, useLiveDataMeta } from "../contexts/LiveDataContext";
 import { useNodeList } from "@/contexts/NodeListContext";
 import Loading from "@/components/loading";
-import { Settings } from "lucide-react";
+import { Settings, Lock, LogIn } from "lucide-react";
 import { useLocalStorage } from "@/hooks/useLocalStorage";
 import type { LiveData } from "@/types/LiveData";
+import { useLocation } from "react-router-dom";
+import { usePublicInfo } from "@/contexts/PublicInfoContext";
+import { useAccount } from "@/contexts/AccountContext";
+import { loginPath } from "@/utils/loginRedirect";
 import { AnimatePresence, motion } from "motion/react";
 import {
   CONTENT_MOTION,
@@ -50,8 +55,34 @@ const ERROR_LINGER_MS = 1500;
 
 const Index = () => {
   const [t] = useTranslation();
+  const location = useLocation();
+  const { publicInfo } = usePublicInfo();
+  const { account, loading: accountLoading } = useAccount();
+  const loginRedirect = loginPath(location.pathname, location.search);
   const { live_data, showCallout } = useLiveData();
   const { nodeList, isLoading, error, refresh } = useNodeList();
+
+  const isAuthRequired = useMemo(() => {
+    // 1. 如果配置明确为私有站点且未登录
+    if (publicInfo?.private_site && !accountLoading && !account?.logged_in) {
+      return true;
+    }
+    // 2. 如果请求返回 401 或提示私有站点/未登录
+    if (error) {
+      const errStr = String(error).toLowerCase();
+      if (
+        errStr.includes("401") ||
+        errStr.includes("private site") ||
+        errStr.includes("login first") ||
+        errStr.includes("permission denied") ||
+        publicInfo?.private_site
+      ) {
+        return true;
+      }
+    }
+    return false;
+  }, [publicInfo?.private_site, accountLoading, account?.logged_in, error]);
+
   // 节点列表未到：卡片区用占位卡片的骨架；live 未到（且还没判定连接失败）：数值用小骨架
   const listLoading = isLoading && !nodeList;
   const liveLoading = live_data === null && showCallout;
@@ -179,6 +210,7 @@ const Index = () => {
   );
 
   useEffect(() => {
+    if (isAuthRequired) return;
     let interval: number | undefined;
     const stopPolling = () => {
       if (interval !== undefined) {
@@ -187,13 +219,13 @@ const Index = () => {
       }
     };
     const startPolling = () => {
-      if (interval === undefined && !document.hidden) {
+      if (interval === undefined && !document.hidden && !isAuthRequired) {
         interval = window.setInterval(refresh, 5000);
       }
     };
     const handleVisibilityChange = () => {
       stopPolling();
-      if (!document.hidden) {
+      if (!document.hidden && !isAuthRequired) {
         refresh();
         startPolling();
       }
@@ -205,7 +237,39 @@ const Index = () => {
       stopPolling();
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
-  }, [refresh]);
+  }, [refresh, isAuthRequired]);
+
+  if (isAuthRequired) {
+    return (
+      <div className="flex justify-center items-center py-16 px-4">
+        <Card className="max-w-md w-full p-8 text-center shadow-lg border rounded-2xl">
+          <Flex direction="column" align="center" gap="4">
+            <div className="w-16 h-16 rounded-full bg-accent-3 flex items-center justify-center text-accent-11">
+              <Lock size={32} />
+            </div>
+            <div className="space-y-1">
+              <Text as="div" size="5" weight="bold">
+                {publicInfo?.sitename || "Komari"}
+              </Text>
+              <Text as="div" size="3" color="gray" className="mt-2 text-muted-foreground">
+                {t("private_site", "这是一个私有的Komari站点，请先登录。")}
+              </Text>
+            </div>
+            <Button
+              size="3"
+              className="w-full mt-2 cursor-pointer flex items-center justify-center gap-2"
+              onClick={() => {
+                window.location.href = loginRedirect;
+              }}
+            >
+              <LogIn size={18} />
+              {t("login.title", "登录")}
+            </Button>
+          </Flex>
+        </Card>
+      </div>
+    );
+  }
 
   /*
     不再整页 early return：统计卡片与节点区照常渲染真实布局，缺数据的部分用 Skeletonize 画成骨架，

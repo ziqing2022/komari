@@ -126,10 +126,17 @@ func CreateClient() (clientUUID, token string, err error) {
 	clientUUID = uuid.New().String()
 	token = uuid.New().String()
 
+	var maxWeight int
+	_ = db.Model(&models.Client{}).Select("COALESCE(MAX(weight), 0)").Scan(&maxWeight)
+
+	now := time.Now().UTC()
 	client := models.Client{
 		UUID:      clientUUID,
 		Token:     token,
-		UpdatedAt: time.Now().UTC(),
+		Name:      "client_" + clientUUID[0:8],
+		Weight:    maxWeight + 1,
+		CreatedAt: now,
+		UpdatedAt: now,
 	}
 
 	if err := db.Create(&client).Error; err != nil {
@@ -142,15 +149,24 @@ func CreateClient() (clientUUID, token string, err error) {
 }
 
 func CreateClientWithName(name string) (clientUUID, token string, err error) {
+	if name == "" {
+		return CreateClient()
+	}
 	db := dbcore.GetDBInstance()
 	clientUUID = uuid.New().String()
 	token = uuid.New().String()
 
+	var maxWeight int
+	_ = db.Model(&models.Client{}).Select("COALESCE(MAX(weight), 0)").Scan(&maxWeight)
+
+	now := time.Now().UTC()
 	client := models.Client{
 		UUID:      clientUUID,
 		Name:      name,
 		Token:     token,
-		UpdatedAt: time.Now().UTC(),
+		Weight:    maxWeight + 1,
+		CreatedAt: now,
+		UpdatedAt: now,
 	}
 
 	if err := db.Create(&client).Error; err != nil {
@@ -180,7 +196,7 @@ func GetClientTokenByUUID(uuid string) (string, error) {
 
 func GetAllClientBasicInfo() ([]models.Client, error) {
 	var clients []models.Client
-	if err := dbcore.GetDBInstance().Find(&clients).Error; err != nil {
+	if err := dbcore.GetDBInstance().Order("weight asc, created_at asc, rowid asc").Find(&clients).Error; err != nil {
 		return nil, err
 	}
 	return clients, nil

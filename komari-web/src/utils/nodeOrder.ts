@@ -8,8 +8,8 @@ export type OfflineServerPosition = "First" | "Keep" | "Last" | string | undefin
  * 先按离线节点位置设置分出在线/离线，再按权重升序。
  */
 export function compareNodesByStatus(
-  a: { uuid: string; weight: number },
-  b: { uuid: string; weight: number },
+  a: { uuid: string; weight: number; created_at?: string; name?: string },
+  b: { uuid: string; weight: number; created_at?: string; name?: string },
   onlineSet: ReadonlySet<string>,
   offlineServerPosition: OfflineServerPosition,
 ): number {
@@ -22,7 +22,15 @@ export function compareNodesByStatus(
     if (aIsOnline && !bIsOnline) return -1;
     if (!aIsOnline && bIsOnline) return 1;
   }
-  return a.weight - b.weight;
+  if (a.weight !== b.weight) {
+    return a.weight - b.weight;
+  }
+  const timeA = new Date(a.created_at || 0).getTime();
+  const timeB = new Date(b.created_at || 0).getTime();
+  if (timeA !== timeB) {
+    return timeA - timeB;
+  }
+  return (a.name || "").localeCompare(b.name || "");
 }
 
 /** 还没有实时数据时的空记录（全部为 0），卡片与表格共用 */

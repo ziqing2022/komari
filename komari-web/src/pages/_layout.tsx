@@ -1,4 +1,5 @@
 import { LiveDataProvider } from "@/contexts/LiveDataContext";
+import { AccountProvider } from "@/contexts/AccountContext";
 import Footer from "../components/Footer";
 import NavBar from "../components/NavBar";
 import { Outlet, useLocation } from "react-router-dom";
@@ -84,9 +85,11 @@ const InnerLayout = () => {
 
 const IndexLayout = () => {
   return (
-    <LiveDataProvider>
-      <InnerLayout />
-    </LiveDataProvider>
+    <AccountProvider>
+      <LiveDataProvider>
+        <InnerLayout />
+      </LiveDataProvider>
+    </AccountProvider>
   );
 };
 

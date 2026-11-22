@@ -29,7 +29,17 @@ const Layout = () => {
             .filter((node) =>
               node.name.toLowerCase().includes(searchTerm.toLowerCase()),
             )
-            .sort((a, b) => a.weight - b.weight)
+            .sort((a, b) => {
+              if (a.weight !== b.weight) {
+                return a.weight - b.weight;
+              }
+              const timeA = new Date(a.created_at || 0).getTime();
+              const timeB = new Date(b.created_at || 0).getTime();
+              if (timeA !== timeB) {
+                return timeA - timeB;
+              }
+              return (a.name || "").localeCompare(b.name || "");
+            })
         : [],
     [nodeDetail, searchTerm],
   );

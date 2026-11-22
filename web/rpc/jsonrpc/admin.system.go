@@ -2,14 +2,12 @@ package jsonrpc
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net"
 	"strconv"
 	"strings"
 	"time"
 
-	"github.com/gorilla/websocket"
 	"github.com/komari-monitor/komari/database/auditlog"
 	"github.com/komari-monitor/komari/database/dbcore"
 	"github.com/komari-monitor/komari/database/models"
@@ -152,14 +150,7 @@ func adminExec(ctx context.Context, req *rpc.JsonRpcRequest) (any, *rpc.JsonRpcE
 		return nil, rpc.MakeError(rpc.InternalError, "Failed to create task: "+err.Error(), nil)
 	}
 	for _, uuid := range onlineClients {
-		payload, _ := json.Marshal(v2.Request{JSONRPC: v2.Version, Method: v2.MethodAgentExec, Params: v2.ExecParams{TaskID: taskId, Command: params.Command}})
-		client := agent_runtime.GetConnectedClient(uuid)
-		if client == nil {
-			return nil, rpc.MakeError(rpc.InvalidParams, "Client connection is null: "+uuid, nil)
-		}
-		if err := client.WriteMessage(websocket.TextMessage, payload); err != nil {
-			return nil, rpc.MakeError(rpc.InvalidParams, "Client connection is broke: "+uuid, nil)
-		}
+		agent_runtime.DispatchV2Event(uuid, v2.MethodAgentExec, v2.ExecParams{TaskID: taskId, Command: params.Command})
 	}
 	for _, uuid := range queuedClients {
 		agent_runtime.DispatchV2Event(uuid, v2.MethodAgentExec, v2.ExecParams{TaskID: taskId, Command: params.Command})

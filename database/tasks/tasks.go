@@ -56,7 +56,7 @@ func GetTasksByClientId(clientId string) ([]models.Task, error) {
 
 func GetSpecificTaskResult(taskId, clientId string) (*models.TaskResult, error) {
 	var result models.TaskResult
-	if err := dbcore.GetDBInstance().Where("task_id = ? AND (client = ? OR client_uuid = ?)", taskId, clientId, clientId).First(&result).Error; err != nil {
+	if err := dbcore.GetDBInstance().Where("task_id = ? AND (client = ? OR LOWER(client) = ?)", taskId, clientId, strings.ToLower(clientId)).First(&result).Error; err != nil {
 		return nil, err
 	}
 	return &result, nil
@@ -97,14 +97,29 @@ func DeleteTaskByTaskId(taskId string) error {
 
 func SaveTaskResult(taskId, clientId, result string, exitCode int, timestamp time.Time) error {
 	db := dbcore.GetDBInstance()
-	return db.Model(&models.TaskResult{}).
-		Where("task_id = ? AND (client = ? OR client_uuid = ?)", taskId, clientId, clientId).
+	t := timestamp.UTC()
+	res := db.Model(&models.TaskResult{}).
+		Where("task_id = ? AND (client = ? OR LOWER(client) = ?)", taskId, clientId, strings.ToLower(clientId)).
 		Updates(map[string]interface{}{
-			"result":       result,
-			"exit_code":    exitCode,
-			"finished_at":  timestamp.UTC(),
-			"completed_at": timestamp.UTC(),
-		}).Error
+			"result":      result,
+			"exit_code":   exitCode,
+			"finished_at": &t,
+		})
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		tr := models.TaskResult{
+			TaskId:     taskId,
+			Client:     clientId,
+			Result:     result,
+			ExitCode:   &exitCode,
+			FinishedAt: &t,
+			CreatedAt:  t,
+		}
+		return db.Create(&tr).Error
+	}
+	return nil
 }
 
 func ClearTaskResultsByTimeBefore(before time.Time) error {

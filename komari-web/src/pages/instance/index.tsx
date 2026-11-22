@@ -162,6 +162,7 @@ const InstanceServerList = memo(function InstanceServerList({
 });
 
 export default function InstancePage() {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const location = useLocation();
   const { onRefresh, online, hasLiveData } = useLiveDataMeta();
@@ -194,7 +195,6 @@ export default function InstancePage() {
     () => nodeList?.find((n) => n.uuid === uuid),
     [nodeList, uuid],
   );
-  const { publicInfo, isLoading: publicInfoLoading } = usePublicInfo();
   // 侧栏顺序依赖实时状态和「离线节点位置」：首次定序前，选中高亮块随重排瞬时就位，不滑过去
   const orderSettled = useOrderSettled(hasLiveData && !publicInfoLoading);
   const isMobile = useIsMobile();

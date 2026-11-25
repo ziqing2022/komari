@@ -169,19 +169,51 @@ func ExecuteCronTask(task *models.CronTask) (string, error) {
 	task.LastResult = summary
 	task.UpdatedAt = now
 
-	// 任务执行后，根据配置的周期自动推算并更新下次调度时间，避免时间倒挂与滞后
+	// 任务执行后，根据配置的周期或 Cron 表达式自动推算并更新下次调度时间，避免时间倒挂与滞后
 	if task.Enabled {
-		interval := task.IntervalMinutes
-		if interval <= 0 {
-			interval = 30
-		}
-		nextRun := now.Add(time.Duration(interval) * time.Minute)
-		task.NextRunAt = &nextRun
+		task.NextRunAt = ComputeNextCronRun(task, now)
 	}
 
 	_ = db.Save(task).Error
 
 	return taskId, nil
+}
+
+// ValidateCronSpec 校验 Cron 表达式是否有效。
+func ValidateCronSpec(spec string) error {
+	trimmed := strings.TrimSpace(spec)
+	if trimmed == "" {
+		return fmt.Errorf("cron expression cannot be empty")
+	}
+	if _, err := scheduler.Parse(trimmed); err != nil {
+		return fmt.Errorf("invalid cron expression: %w", err)
+	}
+	return nil
+}
+
+// ComputeNextCronRun 根据任务调度配置计算下次运行时间（兼容 preset/interval 与 cron）。
+func ComputeNextCronRun(task *models.CronTask, now time.Time) *time.Time {
+	if task == nil || !task.Enabled {
+		return nil
+	}
+	if task.ScheduleType == "cron" {
+		spec := strings.TrimSpace(task.CronExpression)
+		if spec != "" {
+			if s, err := scheduler.Parse(spec); err == nil {
+				nextRun := s.Next(now).UTC()
+				if !nextRun.IsZero() {
+					return &nextRun
+				}
+			}
+		}
+		return nil
+	}
+	interval := task.IntervalMinutes
+	if interval <= 0 {
+		interval = 30
+	}
+	nextRun := now.Add(time.Duration(interval) * time.Minute).UTC()
+	return &nextRun
 }
 
 // ReloadCronSchedule 重新加载并注册所有启用的定时任务到系统调度器

@@ -13,11 +13,13 @@ import SortableRow from "./SortableRow";
 
 const NodeTable = ({
   nodes,
+  isFiltered = false,
   selectedNodes,
   setSelectedNodes,
   settings,
 }: {
   nodes: NodeDetail[];
+  isFiltered?: boolean;
   selectedNodes: string[];
   setSelectedNodes: React.Dispatch<React.SetStateAction<string[]>>;
   settings: any;
@@ -58,11 +60,13 @@ const NodeTable = ({
 
   const handleDragEnd = async (event: any) => {
     setIsDragging(false);
+    if (isFiltered) return;
     const { active, over } = event;
     if (!over || active.id === over.id) return;
 
     const oldIndex = localNodes.findIndex((node) => node.uuid === active.id);
     const newIndex = localNodes.findIndex((node) => node.uuid === over.id);
+    if (oldIndex < 0 || newIndex < 0) return;
     const reorderedNodes = Array.from(localNodes);
     const [reorderedItem] = reorderedNodes.splice(oldIndex, 1);
     reorderedNodes.splice(newIndex, 0, reorderedItem);
@@ -92,11 +96,22 @@ const NodeTable = ({
     () => localNodes.map((node) => node.uuid),
     [localNodes],
   );
+  const visibleSelectedCount = useMemo(
+    () => localNodes.reduce((count, node) => count + (selectedSet.has(node.uuid) ? 1 : 0), 0),
+    [localNodes, selectedSet],
+  );
 
-  // 更新全选逻辑，使用 localNodes
+  // 更新全选逻辑：仅增删当前筛选视图内的节点，保留未显示节点的选中状态
   const handleSelectAll = useCallback(
-    (checked: boolean) => {
-      setSelectedNodes(checked ? localNodes.map((node) => node.uuid) : []);
+    (checked: boolean | "indeterminate") => {
+      const shouldSelect = checked === true;
+      const visibleIds = localNodes.map((node) => node.uuid);
+      const visibleSet = new Set(visibleIds);
+      setSelectedNodes((prev) =>
+        shouldSelect
+          ? Array.from(new Set([...prev, ...visibleIds]))
+          : prev.filter((id) => !visibleSet.has(id)),
+      );
     },
     [localNodes, setSelectedNodes],
   );
@@ -131,9 +146,13 @@ const NodeTable = ({
               <TableHead></TableHead>
               <TableHead>
                 <Checkbox
+                  disabled={localNodes.length === 0}
                   checked={
-                    selectedNodes.length === localNodes.length &&
-                    localNodes.length > 0
+                    localNodes.length > 0 && visibleSelectedCount === localNodes.length
+                      ? true
+                      : visibleSelectedCount > 0
+                        ? "indeterminate"
+                        : false
                   }
                   onCheckedChange={handleSelectAll}
                 />
@@ -158,6 +177,7 @@ const NodeTable = ({
                 <SortableRow
                   key={node.uuid}
                   node={node}
+                  dragDisabled={isFiltered}
                   isSelected={selectedSet.has(node.uuid)}
                   handleSelectNode={handleSelectNode}
                   settings={settings}

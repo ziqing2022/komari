@@ -128,10 +128,7 @@ export const BatchOperationsBar: React.FC<BatchOperationsProps> = ({
         open={versionDialogOpen}
         onOpenChange={setVersionDialogOpen}
         nodes={selectedNodes}
-        onSuccess={() => {
-          onRefresh();
-          onClearSelection();
-        }}
+        onSuccess={onRefresh}
       />
     </>
   );
@@ -158,8 +155,22 @@ const BatchCommandDialog: React.FC<{
   const [twoFaCode, setTwoFaCode] = useState("");
   const [twoFaEnabled, setTwoFaEnabled] = useState(false);
   const [executing, setExecuting] = useState(false);
+  const [timedOut, setTimedOut] = useState(false);
   const [results, setResults] = useState<BatchTaskResult[]>([]);
-  const pollingRef = useRef<NodeJS.Timeout | null>(null);
+  const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const pollRunIdRef = useRef(0);
+
+  const stopPolling = () => {
+    if (pollingRef.current) {
+      clearInterval(pollingRef.current);
+      pollingRef.current = null;
+    }
+    pollRunIdRef.current += 1;
+  };
+
+  useEffect(() => {
+    return () => stopPolling();
+  }, []);
 
   useEffect(() => {
     if (open) {
@@ -171,10 +182,19 @@ const BatchCommandDialog: React.FC<{
         })
         .catch(() => setTwoFaEnabled(false));
       setResults([]);
+      setTimedOut(false);
+      setTwoFaCode("");
+      setExecuting(false);
     } else {
-      if (pollingRef.current) clearInterval(pollingRef.current);
+      stopPolling();
+      setExecuting(false);
     }
   }, [open]);
+
+  const handleStopWaiting = () => {
+    stopPolling();
+    setExecuting(false);
+  };
 
   const handleExecute = async () => {
     if (!command.trim()) {
@@ -186,7 +206,10 @@ const BatchCommandDialog: React.FC<{
       return;
     }
 
+    stopPolling();
+    const runId = pollRunIdRef.current;
     setExecuting(true);
+    setTimedOut(false);
     setResults([]);
 
     try {
@@ -211,35 +234,79 @@ const BatchCommandDialog: React.FC<{
         throw new Error("Missing task ID in response");
       }
 
+      setTwoFaCode("");
+      const dispatchedClients: string[] = Array.isArray(
+        data?.clients || data?.data?.clients
+      )
+        ? data?.clients || data?.data?.clients
+        : [];
+      const expectedCount =
+        dispatchedClients.length > 0 ? dispatchedClients.length : nodes.length;
+
       toast.success(t("admin.batch.execDispatched", "批量任务已下发，正在接收执行结果..."));
 
       // 开始轮询结果
       let attempts = 0;
       pollingRef.current = setInterval(async () => {
+        if (pollRunIdRef.current !== runId) return;
         attempts++;
+        let allFinished = false;
         try {
           const pollRes = await fetch(`/api/admin/task/${taskId}/result`);
+          if (pollRunIdRef.current !== runId) return;
           if (pollRes.ok) {
             const pollData = await pollRes.json();
+            if (pollRunIdRef.current !== runId) return;
             const list: BatchTaskResult[] = pollData.results || pollData.data || [];
             setResults(list);
 
-            const allFinished =
-              list.length >= nodes.length &&
+            allFinished =
+              list.length >= expectedCount &&
               list.every((r) => r.finished_at !== null);
 
-            if (allFinished || attempts >= 40) {
-              if (pollingRef.current) clearInterval(pollingRef.current);
+            if (allFinished) {
+              stopPolling();
               setExecuting(false);
+              return;
             }
           }
         } catch {
           // ignore transient poll error
         }
+
+        if (pollRunIdRef.current === runId && attempts >= 40) {
+          stopPolling();
+          setTimedOut(true);
+          setExecuting(false);
+          setResults((prev) =>
+            prev.map((r) =>
+              r.finished_at !== null
+                ? r
+                : {
+                    ...r,
+                    exit_code: r.exit_code ?? -1,
+                    result:
+                      r.result ||
+                      t(
+                        "admin.batch.execTimeoutNode",
+                        "[执行超时：超过 60 秒未收到完整回传]"
+                      ),
+                  }
+            )
+          );
+          toast.warning(
+            t(
+              "admin.batch.execTimeout",
+              "部分节点超过 60 秒未返回结果，已停止等待"
+            )
+          );
+        }
       }, 1500);
     } catch (err: unknown) {
-      toast.error((err as Error).message || "下发失败");
-      setExecuting(false);
+      if (pollRunIdRef.current === runId) {
+        toast.error((err as Error).message || "下发失败");
+        setExecuting(false);
+      }
     }
   };
 
@@ -313,6 +380,7 @@ const BatchCommandDialog: React.FC<{
                 {results.map((r) => {
                   const isDone = r.finished_at !== null;
                   const isSuccess = isDone && r.exit_code === 0;
+                  const isRowTimedOut = !isDone && timedOut;
                   const clientName =
                     r.client_info?.name ||
                     nodes.find((n) => n.uuid === r.client)?.name ||
@@ -334,6 +402,10 @@ const BatchCommandDialog: React.FC<{
                             >
                               {isSuccess ? "成功 (0)" : `失败 (${r.exit_code ?? -1})`}
                             </Badge>
+                          ) : isRowTimedOut ? (
+                            <Badge size="1" color="amber" variant="soft">
+                              已超时
+                            </Badge>
                           ) : (
                             <Badge size="1" color="blue" variant="surface">
                               <RefreshCw size={10} className="animate-spin mr-1 inline" />
@@ -341,7 +413,7 @@ const BatchCommandDialog: React.FC<{
                             </Badge>
                           )}
                         </Flex>
-                        {isDone && (
+                        {(isDone || (isRowTimedOut && Boolean(r.result))) && (
                           <IconButton
                             size="1"
                             variant="ghost"
@@ -355,7 +427,12 @@ const BatchCommandDialog: React.FC<{
                         )}
                       </Flex>
                       <div className="bg-black/85 text-emerald-400 p-2 rounded font-mono text-[11px] whitespace-pre-wrap max-h-32 overflow-y-auto">
-                        {r.result || (isDone ? "[无输出内容]" : "正在等待 Agent 返回输出...")}
+                        {r.result ||
+                          (isDone
+                            ? "[无输出内容]"
+                            : isRowTimedOut
+                              ? "[执行超时：未收到节点回传结果]"
+                              : "正在等待 Agent 返回输出...")}
                       </div>
                     </div>
                   );
@@ -366,11 +443,22 @@ const BatchCommandDialog: React.FC<{
         </div>
 
         <Flex justify="end" gap="2" className="mt-4 pt-2 border-t">
+          {executing && (
+            <Button
+              variant="soft"
+              color="amber"
+              onClick={handleStopWaiting}
+            >
+              {t("admin.batch.stopWaiting", "停止等待")}
+            </Button>
+          )}
           <Button
             variant="soft"
             color="gray"
-            disabled={executing}
-            onClick={() => onOpenChange(false)}
+            onClick={() => {
+              handleStopWaiting();
+              onOpenChange(false);
+            }}
           >
             {t("common.close", "关闭")}
           </Button>
@@ -406,6 +494,17 @@ const BatchGroupTagsDialog: React.FC<{
   const [submitting, setSubmitting] = useState(false);
   const [progress, setProgress] = useState(0);
 
+  useEffect(() => {
+    if (open) {
+      setUpdateGroup(false);
+      setNewGroup("");
+      setTagMode("keep");
+      setTagInput("");
+      setSubmitting(false);
+      setProgress(0);
+    }
+  }, [open]);
+
   const handleSubmit = async () => {
     if (!updateGroup && tagMode === "keep") {
       toast.warning(t("admin.batch.noChanges", "请至少勾选或选择一项需要更新的内容"));
@@ -415,56 +514,73 @@ const BatchGroupTagsDialog: React.FC<{
     setSubmitting(true);
     setProgress(0);
     let successCount = 0;
+    let cursor = 0;
+    const concurrency = Math.min(5, Math.max(1, nodes.length));
 
-    for (let i = 0; i < nodes.length; i++) {
-      const node = nodes[i];
-      const payload: Record<string, unknown> = {
-        uuid: node.uuid,
-      };
+    const worker = async () => {
+      while (cursor < nodes.length) {
+        const index = cursor++;
+        const node = nodes[index];
+        if (!node) break;
 
-      if (updateGroup) {
-        payload.group = newGroup.trim();
+        const payload: Record<string, unknown> = {
+          uuid: node.uuid,
+        };
+
+        if (updateGroup) {
+          payload.group = newGroup.trim();
+        }
+
+        if (tagMode === "replace") {
+          payload.tags = tagInput
+            .split(/[,;\s]+/)
+            .filter(Boolean)
+            .join(";");
+        } else if (tagMode === "append") {
+          const existingTags = (node.tags || "")
+            .split(/[,;\s]+/)
+            .filter(Boolean);
+          const newTags = tagInput
+            .split(/[,;\s]+/)
+            .filter(Boolean);
+          const merged = Array.from(new Set([...existingTags, ...newTags]));
+          payload.tags = merged.join(";");
+        }
+
+        try {
+          const res = await fetch(`/api/admin/client/${node.uuid}/edit`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          });
+          if (res.ok) successCount++;
+        } catch {
+          // continue with other nodes
+        }
+        setProgress((prev) => prev + 1);
       }
+    };
 
-      if (tagMode === "replace") {
-        // Format tags with semicolon separator
-        payload.tags = tagInput
-          .split(/[,;\s]+/)
-          .filter(Boolean)
-          .join(";");
-      } else if (tagMode === "append") {
-        const existingTags = (node.tags || "")
-          .split(/[,;\s]+/)
-          .filter(Boolean);
-        const newTags = tagInput
-          .split(/[,;\s]+/)
-          .filter(Boolean);
-        const merged = Array.from(new Set([...existingTags, ...newTags]));
-        payload.tags = merged.join(";");
-      }
-
-      try {
-        const res = await fetch(`/api/admin/client/${node.uuid}/edit`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
-        });
-        if (res.ok) successCount++;
-      } catch {
-        // continue with other nodes
-      }
-      setProgress(i + 1);
-    }
+    await Promise.all(Array.from({ length: concurrency }, () => worker()));
 
     setSubmitting(false);
-    toast.success(
-      t("admin.batch.groupTagsSuccess", `已成功更新 {{count}} / {{total}} 台服务器`, {
-        count: successCount,
-        total: nodes.length,
-      })
-    );
-    onSuccess();
+    if (successCount < nodes.length) {
+      toast.warning(
+        t("admin.batch.groupTagsSuccess", `已成功更新 {{count}} / {{total}} 台服务器`, {
+          count: successCount,
+          total: nodes.length,
+        })
+      );
+    } else {
+      toast.success(
+        t("admin.batch.groupTagsSuccess", `已成功更新 {{count}} / {{total}} 台服务器`, {
+          count: successCount,
+          total: nodes.length,
+        })
+      );
+    }
     onOpenChange(false);
+    onSuccess();
   };
 
   return (
@@ -580,7 +696,7 @@ const BatchGroupTagsDialog: React.FC<{
 /* =========================================================================
  * 3. 批量版本升级/切换对话框
  * ========================================================================= */
-const DEFAULT_PRESET_VERSIONS = ["latest", "1.2.13", "1.2.12", "1.2.11"];
+const DEFAULT_PRESET_VERSIONS = ["latest", "1.2.14", "1.2.13", "1.2.12", "1.2.11"];
 
 const BatchVersionDialog: React.FC<{
   open: boolean;
@@ -599,7 +715,12 @@ const BatchVersionDialog: React.FC<{
   >({});
 
   useEffect(() => {
-    if (!open) return;
+    if (!open) {
+      setSubmitting(false);
+      return;
+    }
+    setNodeResults({});
+    setSubmitting(false);
     let isMounted = true;
     const fetchReleases = async () => {
       try {
@@ -643,30 +764,48 @@ const BatchVersionDialog: React.FC<{
     setNodeResults({ ...results });
 
     let successCount = 0;
-    for (const node of nodes) {
-      try {
-        await call("admin:switchAgentVersion", {
-          uuid: node.uuid,
-          version: targetVersion.trim(),
-        });
-        results[node.uuid] = { status: "success", message: "指令已下发" };
-        successCount++;
-      } catch (err: unknown) {
-        results[node.uuid] = {
-          status: "error",
-          message: (err as Error).message || "下发失败/离线",
-        };
+    let cursor = 0;
+    const concurrency = Math.min(5, Math.max(1, nodes.length));
+
+    const worker = async () => {
+      while (cursor < nodes.length) {
+        const node = nodes[cursor++];
+        if (!node) break;
+        try {
+          await call("admin:switchAgentVersion", {
+            uuid: node.uuid,
+            version: targetVersion.trim(),
+          });
+          results[node.uuid] = { status: "success", message: "指令已下发" };
+          successCount++;
+        } catch (err: unknown) {
+          results[node.uuid] = {
+            status: "error",
+            message: (err as Error).message || "下发失败/离线",
+          };
+        }
+        setNodeResults({ ...results });
       }
-      setNodeResults({ ...results });
-    }
+    };
+
+    await Promise.all(Array.from({ length: concurrency }, () => worker()));
 
     setSubmitting(false);
-    toast.success(
-      t("admin.batch.switchSuccess", `已向 {{count}} / {{total}} 台服务器下发版本切换指令`, {
-        count: successCount,
-        total: nodes.length,
-      })
-    );
+    if (successCount < nodes.length) {
+      toast.warning(
+        t("admin.batch.switchSuccess", `已向 {{count}} / {{total}} 台服务器下发版本切换指令`, {
+          count: successCount,
+          total: nodes.length,
+        })
+      );
+    } else {
+      toast.success(
+        t("admin.batch.switchSuccess", `已向 {{count}} / {{total}} 台服务器下发版本切换指令`, {
+          count: successCount,
+          total: nodes.length,
+        })
+      );
+    }
     onSuccess();
   };
 
@@ -709,7 +848,7 @@ const BatchVersionDialog: React.FC<{
             <TextField.Root
               value={targetVersion}
               onChange={(e) => setTargetVersion(e.target.value)}
-              placeholder="latest / 1.2.13"
+              placeholder="latest / 1.2.14"
               disabled={submitting}
             />
           </div>
@@ -752,9 +891,11 @@ const BatchVersionDialog: React.FC<{
             disabled={submitting}
             onClick={() => onOpenChange(false)}
           >
-            {t("common.cancel", "取消")}
+            {Object.keys(nodeResults).length > 0 && !submitting
+              ? t("common.close", "关闭")
+              : t("common.cancel", "取消")}
           </Button>
-          <Button onClick={handleSwitch} disabled={submitting}>
+          <Button onClick={handleSwitch} disabled={submitting || nodes.length === 0}>
             {submitting ? (
               <RefreshCw size={14} className="animate-spin mr-1" />
             ) : (

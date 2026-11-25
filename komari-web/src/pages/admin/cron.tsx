@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import {
   Button,
@@ -33,8 +33,32 @@ import {
 import { toast } from "sonner";
 import { NodeDetailsProvider, useNodeDetails } from "@/contexts/NodeDetailsContext";
 import NodeSelector from "@/components/NodeSelector";
-import NodeSelectorDialog from "@/components/NodeSelectorDialog";
 import Loading from "@/components/loading";
+
+function validateCronExpression(spec: string): string | null {
+  const trimmed = spec.trim();
+  if (!trimmed) {
+    return "请输入 Cron 表达式";
+  }
+  if (trimmed.startsWith("@every ")) {
+    const dur = trimmed.slice(7).trim();
+    if (!/^\d+(ns|us|µs|ms|s|m|h)+$/.test(dur)) {
+      return "@every 周期格式无效，例如 @every 5m";
+    }
+    return null;
+  }
+  const fields = trimmed.split(/\s+/);
+  if (fields.length !== 5 && fields.length !== 6) {
+    return "Cron 表达式必须包含 5 位或 6 位字段（如 0 * * * *）";
+  }
+  const tokenPattern = /^(\*|\d+(-\d+)?)(\/\d+)?(,(\*|\d+(-\d+)?)(\/\d+)?)*$/;
+  for (const field of fields) {
+    if (!tokenPattern.test(field)) {
+      return `Cron 字段格式无效：${field}`;
+    }
+  }
+  return null;
+}
 
 export interface CronTask {
   id: string;
@@ -129,6 +153,8 @@ const CronContent = () => {
   const [availableBatches, setAvailableBatches] = useState<BatchMeta[]>([]);
   const [selectedBatchId, setSelectedBatchId] = useState<string>("");
   const [expandCommand, setExpandCommand] = useState(false);
+  const logsAbortRef = useRef<AbortController | null>(null);
+  const logsReqSeqRef = useRef(0);
 
   const LOCAL_STORAGE_KEY = "komari_cron_tasks";
   const LOCAL_STORAGE_INIT_KEY = "komari_cron_initialized";
@@ -183,6 +209,10 @@ const CronContent = () => {
     if (!task.enabled) {
       return { ...task, next_run_at: null };
     }
+    // Cron 表达式任务的下次运行时间由后端解析调度引擎给出，不由前端按固定间隔覆写
+    if (task.schedule_type === "cron") {
+      return task;
+    }
     const now = Date.now();
     const lastTime = task.last_run_at ? new Date(task.last_run_at).getTime() : 0;
     const nextTime = task.next_run_at ? new Date(task.next_run_at).getTime() : 0;
@@ -202,6 +232,7 @@ const CronContent = () => {
   // Fetch Tasks with robust API and localStorage sync
   const loadTasks = async () => {
     setLoading(true);
+    let apiErrorMsg = "";
     try {
       const res = await fetch("/api/admin/cron");
       if (res.ok) {
@@ -222,11 +253,18 @@ const CronContent = () => {
           localStorage.setItem(LOCAL_STORAGE_INIT_KEY, "true");
           return;
         }
+      } else {
+        apiErrorMsg = `HTTP ${res.status}`;
       }
-    } catch (e) {
+    } catch (e: any) {
+      apiErrorMsg = e?.message || "network error";
       console.warn("Failed to load cron tasks from API, trying fallback storage", e);
     } finally {
       setLoading(false);
+    }
+
+    if (apiErrorMsg) {
+      toast.error(t("cron.loadFailed", `加载定时任务失败（${apiErrorMsg}），显示本地缓存`));
     }
 
     // Fallback: Read from localStorage if API is temporarily unavailable
@@ -300,6 +338,17 @@ const CronContent = () => {
       toast.error(t("cron.commandPlaceholder", "请输入 Shell 命令"));
       return;
     }
+    if (formScheduleType === "cron") {
+      const cronErr = validateCronExpression(formCronExpr);
+      if (cronErr) {
+        toast.error(t("cron.errors.invalidCron", cronErr));
+        return;
+      }
+    }
+    if (formTargetNodes.length === 0) {
+      toast.error(t("cron.errors.emptyTargetNodes", "请至少选择一台目标服务器，或切换为「全部服务器」"));
+      return;
+    }
 
     const clean2FaCode = form2FaCode.replace(/[\s-]/g, "").trim();
     if (twoFaEnabled && !clean2FaCode) {
@@ -311,8 +360,8 @@ const CronContent = () => {
     const intervalMins = Number(formIntervalMinutes) || 30;
     const now = Date.now();
     let computedNextRun: string | null = null;
-    if (isEnabled) {
-      if (editingTask?.next_run_at && new Date(editingTask.next_run_at).getTime() > now && editingTask.interval_minutes === intervalMins) {
+    if (isEnabled && formScheduleType !== "cron") {
+      if (editingTask?.next_run_at && new Date(editingTask.next_run_at).getTime() > now && editingTask.interval_minutes === intervalMins && editingTask.schedule_type !== "cron") {
         computedNextRun = editingTask.next_run_at;
       } else {
         computedNextRun = new Date(now + intervalMins * 60 * 1000).toISOString();
@@ -326,7 +375,7 @@ const CronContent = () => {
       command: formCommand.trim(),
       schedule_type: formScheduleType,
       interval_minutes: intervalMins,
-      cron_expression: formScheduleType === "cron" ? formCronExpr : undefined,
+      cron_expression: formScheduleType === "cron" ? formCronExpr.trim() : undefined,
       target_nodes: formTargetNodes,
       enabled: isEnabled,
       notify_on_failure: formNotifyOnFailure,
@@ -568,16 +617,24 @@ const CronContent = () => {
 
   // Fetch task logs from API
   const fetchTaskLogs = async (taskId: string, silent = false, batchId?: string) => {
-    if (!silent) setLoadingLogs(true);
+    const seq = ++logsReqSeqRef.current;
+    if (!silent) {
+      logsAbortRef.current?.abort();
+      setLoadingLogs(true);
+    }
+    const controller = new AbortController();
+    logsAbortRef.current = controller;
     try {
       const activeBatch = batchId !== undefined ? batchId : selectedBatchId;
       let url = `/api/admin/cron/${encodeURIComponent(taskId)}/logs?limit=500`;
       if (activeBatch) {
         url += `&batch_id=${encodeURIComponent(activeBatch)}`;
       }
-      const res = await fetch(url);
+      const res = await fetch(url, { signal: controller.signal });
+      if (logsReqSeqRef.current !== seq) return;
       if (res.ok) {
         const json = await res.json();
+        if (logsReqSeqRef.current !== seq) return;
         const logs: CronLog[] = Array.isArray(json?.logs) ? json.logs : Array.isArray(json?.data) ? json.data : [];
         setSelectedTaskLogs(logs);
         if (Array.isArray(json?.batches)) {
@@ -589,36 +646,55 @@ const CronContent = () => {
           }
         }
       }
-    } catch (e) {
-      console.warn("Failed to fetch logs:", e);
+    } catch (e: any) {
+      if (e?.name !== "AbortError") {
+        console.warn("Failed to fetch logs:", e);
+      }
     } finally {
-      if (!silent) setLoadingLogs(false);
+      if (!silent && logsReqSeqRef.current === seq) {
+        setLoadingLogs(false);
+      }
     }
   };
 
-  // View Logs: open dialog, record active task ID, and fetch latest records
+  // View Logs: open dialog, reset previous task logs, and fetch latest records
   const handleViewLogs = async (task: CronTask) => {
+    logsAbortRef.current?.abort();
     setLogsTaskName(task.name);
     setLogsCurrentTaskId(task.id);
     setSelectedBatchId("");
     setExpandCommand(false);
     setAvailableBatches([]);
+    setSelectedTaskLogs([]);
+    setLoadingLogs(true);
     setLogsDialogOpen(true);
-    fetchTaskLogs(task.id, false);
+    fetchTaskLogs(task.id, false, "");
   };
+
+  const hasRunningLogs = useMemo(
+    () =>
+      selectedTaskLogs.some(
+        (l) => l.status === "running" || (!l.finished_at && !l.end_time)
+      ),
+    [selectedTaskLogs]
+  );
 
   // Auto-poll logs while dialog is open (fast 2.5s interval if any task is executing)
   useEffect(() => {
     if (!logsDialogOpen || !logsCurrentTaskId) return;
 
-    const hasRunning = selectedTaskLogs.some((l) => l.status === "running" || (!l.finished_at && !l.end_time));
-
     const timer = setInterval(() => {
       fetchTaskLogs(logsCurrentTaskId, true, selectedBatchId);
-    }, hasRunning ? 2500 : 8000);
+    }, hasRunningLogs ? 2500 : 8000);
 
     return () => clearInterval(timer);
-  }, [logsDialogOpen, logsCurrentTaskId, selectedTaskLogs, selectedBatchId]);
+  }, [logsDialogOpen, logsCurrentTaskId, hasRunningLogs, selectedBatchId]);
+
+  useEffect(() => {
+    if (!logsDialogOpen) {
+      logsAbortRef.current?.abort();
+    }
+  }, [logsDialogOpen]);
 
 
 
@@ -985,15 +1061,9 @@ const CronContent = () => {
                     <span className="text-xs text-muted-foreground">
                       已选择 {formTargetNodes.length} 台服务器，定时任务将仅在选中的节点上并发下发执行。
                     </span>
-                    <NodeSelectorDialog
-                      value={formTargetNodes}
-                      onChange={setFormTargetNodes}
-                      title="选择下发目标服务器"
-                    >
-                      <Button type="button" size="1" variant="soft">
-                        点此选择节点 ({formTargetNodes.length}/{nodeDetail?.length || 0})
-                      </Button>
-                    </NodeSelectorDialog>
+                    <span className="text-xs text-muted-foreground">
+                      ({formTargetNodes.length}/{nodeDetail?.length || 0})
+                    </span>
                   </Flex>
                   <div className="max-h-48 overflow-y-auto">
                     <NodeSelector

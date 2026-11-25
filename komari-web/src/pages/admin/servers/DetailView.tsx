@@ -1,6 +1,7 @@
 import { lazy, Suspense, useState } from "react";
 import type { NodeDetail } from "@/contexts/NodeDetailsContext";
-import { useLiveData } from "@/contexts/LiveDataContext";
+import { useLiveDataMeta } from "@/contexts/LiveDataContext";
+import { isNodeOnline } from "@/utils/nodeOnline";
 import { useTranslation } from "react-i18next";
 import { Badge } from "@radix-ui/themes";
 import Flag from "@/components/Flag";
@@ -12,12 +13,12 @@ export default function DetailView({ node }: { node: NodeDetail }) {
   const [open, setOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
   const { t } = useTranslation();
-  const { live_data } = useLiveData();
-  const isOnline = Boolean(
-    (node as any)?.online ||
-    live_data?.data?.online?.some(
-      (id) => id === node.uuid || id?.toLowerCase() === node.uuid?.toLowerCase()
-    )
+  const { online, hasLiveData } = useLiveDataMeta();
+  const isOnline = isNodeOnline(
+    node.uuid,
+    online,
+    hasLiveData,
+    (node as any)?.online
   );
 
   return (

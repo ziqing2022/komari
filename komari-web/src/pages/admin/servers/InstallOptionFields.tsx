@@ -283,7 +283,7 @@ export default function InstallOptionFields({
           <TextField.Root
             placeholder={t(
               "admin.nodeTable.install_dir_placeholder",
-              "安装目录，为空则使用默认目录(/opt/komari-agent)"
+              "安装目录，为空则使用默认目录(/opt/komari)"
             )}
             value={installOptions.dir}
             onChange={(e) =>
@@ -321,7 +321,7 @@ export default function InstallOptionFields({
           <TextField.Root
             placeholder={t(
               "admin.nodeTable.serviceName_placeholder",
-              "服务名称，为空则使用默认名称(komari-agent)"
+              "服务名称，为空则使用默认名称(sser)"
             )}
             value={installOptions.serviceName}
             onChange={(e) =>

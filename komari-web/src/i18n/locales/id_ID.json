@@ -1725,7 +1725,8 @@
       "ping": "Kualitas jaringan",
       "resources": "Kapasitas sumber daya",
       "shortcuts": "Aksi cepat",
-      "traffic": "Lalu lintas 24 jam"
+      "traffic": "Lalu lintas 24 jam",
+      "cron": "Tugas terjadwal"
     },
     "width": "Lebar kartu",
     "workspace": "Dasbor saya"

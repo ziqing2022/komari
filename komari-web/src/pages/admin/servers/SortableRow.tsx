@@ -17,12 +17,14 @@ import DetailView from "./DetailView";
 
 const SortableRow = ({
   node,
+  dragDisabled = false,
   isSelected,
   handleSelectNode,
   settings,
   isSnapshotBackend,
 }: {
   node: NodeDetail;
+  dragDisabled?: boolean;
   isSelected: boolean;
   handleSelectNode: (uuid: string, checked: boolean) => void;
   settings: any;
@@ -32,6 +34,7 @@ const SortableRow = ({
   const { attributes, listeners, setNodeRef, transform, transition } =
     useSortable({
       id: node.uuid,
+      disabled: dragDisabled,
       // content 层：重排时长与曲线来自统一 token（dnd-kit 只吃 CSS 字符串，这里由常量拼出）
       transition: {
         duration: reduced ? 0 : MOTION_MS.base,
@@ -61,20 +64,24 @@ const SortableRow = ({
     >
       <TableCell>
         <div
-          {...attributes}
-          {...listeners}
-          className={`cursor-move p-2 rounded hover:bg-accent-a3 transition-colors ${
-            isMobile ? "touch-manipulation select-none" : ""
-          }`}
+          {...(dragDisabled ? {} : attributes)}
+          {...(dragDisabled ? {} : listeners)}
+          className={`p-2 rounded transition-colors ${
+            dragDisabled
+              ? "cursor-not-allowed opacity-35"
+              : "cursor-move hover:bg-accent-a3"
+          } ${isMobile ? "touch-manipulation select-none" : ""}`}
           style={{
-            touchAction: "none", // 禁用移动端的默认手势
+            touchAction: dragDisabled ? "auto" : "none", // 禁用移动端的默认手势
             WebkitUserSelect: "none",
             userSelect: "none",
           }}
           title={
-            isMobile
-              ? t("admin.nodeTable.dragToReorder", "长按拖拽重新排序")
-              : undefined
+            dragDisabled
+              ? t("admin.nodeTable.dragDisabledFiltered", "搜索或筛选状态时不可拖拽排序")
+              : isMobile
+                ? t("admin.nodeTable.dragToReorder", "长按拖拽重新排序")
+                : undefined
           }
         >
           <MenuIcon size={isMobile ? 18 : 16} color={"var(--gray-8)"} />

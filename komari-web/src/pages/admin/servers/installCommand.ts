@@ -116,7 +116,7 @@ export function buildInstallCommand(
   if (selectedPlatform === "windows") {
     scriptFile = "install.ps1";
   }
-  let scriptUrl = `https://raw.githubusercontent.com/komari-monitor/komari-agent/refs/heads/main/${scriptFile}`;
+  let scriptUrl = `https://raw.githubusercontent.com/ziqing2022/komari-agent/refs/heads/main/${scriptFile}`;
   if (enableGhproxy && ghproxy) {
     scriptUrl = scriptUrl.slice(8); // 去掉 https://
     if (ghproxy.endsWith("/")) {
@@ -175,10 +175,10 @@ export function buildInstallCommand(
         ? `touch .komari-auto-discovery.json && ` +
           `docker run -d --name komari-agent --restart=always ` +
           `-v .komari-auto-discovery.json:/app/auto-discovery.json ` +
-          `ghcr.io/komari-monitor/komari-agent:latest ` +
+          `ghcr.io/ziqing2022/komari-agent:latest ` +
           quoteShellArgs(dockerArgs)
         : `docker run -d --name komari-agent --restart=always ` +
-          `ghcr.io/komari-monitor/komari-agent:latest ` +
+          `ghcr.io/ziqing2022/komari-agent:latest ` +
           quoteShellArgs(dockerArgs);
       break;
     }

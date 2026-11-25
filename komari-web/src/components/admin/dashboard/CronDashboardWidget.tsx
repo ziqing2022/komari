@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from "react";
-import { Badge, Button, Flex, IconButton, Text } from "@radix-ui/themes";
+import { Badge, Button, Dialog, Flex, IconButton, Text, TextField } from "@radix-ui/themes";
 import { useTranslation } from "react-i18next";
 import {
   CalendarClock,
@@ -9,6 +9,7 @@ import {
   Clock,
   ArrowRight,
   RefreshCw,
+  ShieldCheck,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Link } from "react-router-dom";
@@ -34,13 +35,33 @@ export const CronDashboardWidget: React.FC<{ limit?: number }> = ({ limit = 4 })
   const [tasks, setTasks] = useState<DashboardCronTask[]>([]);
   const [loading, setLoading] = useState(true);
   const [runningTaskId, setRunningTaskId] = useState<string | null>(null);
+  const [twoFaEnabled, setTwoFaEnabled] = useState(false);
+  const [twoFaDialogOpen, setTwoFaDialogOpen] = useState(false);
+  const [pendingRunTask, setPendingRunTask] = useState<DashboardCronTask | null>(null);
+  const [twoFaCode, setTwoFaCode] = useState("");
+
+  useEffect(() => {
+    fetch("/api/me")
+      .then((res) => res.json())
+      .then((data) => {
+        const user = data?.data || data;
+        setTwoFaEnabled(Boolean(user?.["2fa_enabled"]));
+      })
+      .catch(() => setTwoFaEnabled(false));
+  }, []);
 
   const fetchTasks = useCallback(async () => {
     try {
       const res = await fetch("/api/admin/cron");
       if (res.ok) {
         const json = await res.json();
-        const taskList: DashboardCronTask[] = json?.tasks || json?.data || [];
+        const taskList: DashboardCronTask[] = Array.isArray(json?.tasks)
+          ? json.tasks
+          : Array.isArray(json?.data?.tasks)
+            ? json.data.tasks
+            : Array.isArray(json?.data)
+              ? json.data
+              : [];
         setTasks(taskList);
       }
     } catch {
@@ -54,26 +75,65 @@ export const CronDashboardWidget: React.FC<{ limit?: number }> = ({ limit = 4 })
     fetchTasks();
   }, [fetchTasks]);
 
-  const handleRunNow = async (task: DashboardCronTask, e: React.MouseEvent) => {
-    e.stopPropagation();
-    e.preventDefault();
+  const executeRunNow = async (task: DashboardCronTask, raw2FaCode = "") => {
+    const clean2FaCode = raw2FaCode.replace(/[\s-]/g, "").trim();
     setRunningTaskId(task.id);
     try {
-      const res = await fetch(`/api/admin/cron/${task.id}/run`, {
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+      };
+      if (clean2FaCode) {
+        headers["X-2FA-Code"] = clean2FaCode;
+      }
+      const res = await fetch(`/api/admin/cron/${encodeURIComponent(task.id)}/run`, {
         method: "POST",
+        headers,
+        body: JSON.stringify({ "2fa_code": clean2FaCode || undefined }),
       });
       if (res.ok) {
         toast.success(t("cron.runSuccess", "定时任务已触发下发"));
+        setTwoFaDialogOpen(false);
+        setPendingRunTask(null);
+        setTwoFaCode("");
         fetchTasks();
       } else {
         const err = await res.json().catch(() => ({}));
-        toast.error(err.message || t("cron.runFailed", "触发失败"));
+        if (res.status === 401 && !clean2FaCode) {
+          setTwoFaEnabled(true);
+          setPendingRunTask(task);
+          setTwoFaCode("");
+          setTwoFaDialogOpen(true);
+        } else {
+          toast.error(err.message || t("cron.runFailed", "触发失败"));
+        }
       }
     } catch {
       toast.error(t("cron.runFailed", "触发失败"));
     } finally {
       setRunningTaskId(null);
     }
+  };
+
+  const handleRunNow = (task: DashboardCronTask, e: React.MouseEvent) => {
+    e.stopPropagation();
+    e.preventDefault();
+    if (twoFaEnabled) {
+      setPendingRunTask(task);
+      setTwoFaCode("");
+      setTwoFaDialogOpen(true);
+      return;
+    }
+    void executeRunNow(task);
+  };
+
+  const handleConfirm2FaRun = async () => {
+    if (!pendingRunTask) return;
+    const clean = twoFaCode.replace(/[\s-]/g, "").trim();
+    if (!clean) {
+      toast.error(t("account.otp_empty_error", "请输入动态口令"));
+      return;
+    }
+    await executeRunNow(pendingRunTask, clean);
   };
 
   const enabledCount = tasks.filter((t) => t.enabled).length;
@@ -182,6 +242,42 @@ export const CronDashboardWidget: React.FC<{ limit?: number }> = ({ limit = 4 })
           })}
         </Flex>
       )}
+
+      <Dialog.Root open={twoFaDialogOpen} onOpenChange={setTwoFaDialogOpen}>
+        <Dialog.Content className="max-w-sm">
+          <Dialog.Title className="flex items-center gap-2">
+            <ShieldCheck size={16} className="text-amber-500" />
+            <span>{t("cron.runConfirmTitle", "2FA 验证并执行任务")}</span>
+          </Dialog.Title>
+          <Dialog.Description size="2" color="gray" className="mb-3">
+            {t("cron.runConfirmDesc", `即将立即触发任务「${pendingRunTask?.name || ""}」，请输入双因素认证动态口令：`)}
+          </Dialog.Description>
+          <TextField.Root
+            value={twoFaCode}
+            onChange={(e) => setTwoFaCode((e.target as HTMLInputElement).value)}
+            placeholder="6-digit 2FA Code"
+            disabled={runningTaskId !== null}
+            autoFocus
+            onKeyDown={(e) => {
+              if (e.key === "Enter") void handleConfirm2FaRun();
+            }}
+          />
+          <Flex justify="end" gap="2" className="mt-4">
+            <Button
+              variant="soft"
+              color="gray"
+              disabled={runningTaskId !== null}
+              onClick={() => setTwoFaDialogOpen(false)}
+            >
+              {t("common.cancel", "取消")}
+            </Button>
+            <Button disabled={runningTaskId !== null} onClick={() => void handleConfirm2FaRun()}>
+              <Play size={14} className="mr-1" />
+              {t("cron.runNow", "立即执行")}
+            </Button>
+          </Flex>
+        </Dialog.Content>
+      </Dialog.Root>
     </Flex>
   );
 };

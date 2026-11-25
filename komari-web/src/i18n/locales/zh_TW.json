@@ -1884,7 +1884,8 @@
       "ping": "網路品質",
       "resources": "資源容量",
       "disk": "磁碟壓力",
-      "shortcuts": "快捷操作"
+      "shortcuts": "快捷操作",
+      "cron": "定時任務"
     }
   },
   "onboarding": {

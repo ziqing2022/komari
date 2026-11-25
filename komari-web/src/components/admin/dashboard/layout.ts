@@ -2,7 +2,7 @@ export const DASHBOARD_SETTINGS_KEY = "_komari_dashboard_v1";
 
 export const widgetIds = [
   "overview", "database", "expiry", "traffic", "cpu", "memory",
-  "resources", "disk", "ping", "shortcuts",
+  "resources", "disk", "ping", "shortcuts", "cron",
 ] as const;
 export type WidgetId = typeof widgetIds[number];
 export type WidgetWidth = "compact" | "wide" | "full";
@@ -18,7 +18,7 @@ export function defaultHeight(id: WidgetId): WidgetHeight {
 }
 
 export function defaultLimit(id: WidgetId): number {
-  if (id === "cpu" || id === "memory") return 4;
+  if (id === "cpu" || id === "memory" || id === "cron") return 4;
   if (id === "ping") return 3;
   return 5;
 }

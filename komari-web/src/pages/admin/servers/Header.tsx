@@ -14,12 +14,18 @@ import AutoDiscoverySection from "./AutoDiscoverySection";
 const Header = ({
   searchTerm,
   setSearchTerm,
+  statusFilter = "all",
+  setStatusFilter,
+  statusCounts,
   selectedNodes,
   settings,
   settingsLoading,
 }: {
   searchTerm: string;
   setSearchTerm: (term: string) => void;
+  statusFilter?: "all" | "online" | "offline";
+  setStatusFilter?: (filter: "all" | "online" | "offline") => void;
+  statusCounts?: { all: number; online: number; offline: number };
   selectedNodes: string[];
   settings: any;
   settingsLoading: boolean;
@@ -72,8 +78,36 @@ const Header = ({
       }
       actions={
         <>
+          {setStatusFilter && statusCounts && (
+            <Flex align="center" gap="1" wrap="wrap">
+              <Button
+                size="2"
+                variant={statusFilter === "all" ? "solid" : "soft"}
+                color="gray"
+                onClick={() => setStatusFilter("all")}
+              >
+                {t("common.all", "全部")} ({statusCounts.all})
+              </Button>
+              <Button
+                size="2"
+                variant={statusFilter === "online" ? "solid" : "soft"}
+                color="green"
+                onClick={() => setStatusFilter("online")}
+              >
+                {t("common.online", "在线")} ({statusCounts.online})
+              </Button>
+              <Button
+                size="2"
+                variant={statusFilter === "offline" ? "solid" : "soft"}
+                color="red"
+                onClick={() => setStatusFilter("offline")}
+              >
+                {t("common.offline", "离线")} ({statusCounts.offline})
+              </Button>
+            </Flex>
+          )}
           <TextField.Root
-            placeholder={t("admin.nodeTable.searchByName")}
+            placeholder={t("admin.nodeTable.searchNodes", "搜索名称 / IP / 分组 / 备注 / 版本")}
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
           />

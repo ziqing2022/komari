@@ -39,6 +39,10 @@ func findCronTask(id string) (*models.CronTask, error) {
 	return &task, nil
 }
 
+func needsNextRunRecalc(task *models.CronTask, now time.Time) bool {
+	return task.NextRunAt == nil || task.NextRunAt.Before(now) || (task.LastRunAt != nil && !task.NextRunAt.After(*task.LastRunAt))
+}
+
 // ListCronTasks 获取全部定时任务列表
 func ListCronTasks(c *gin.Context) {
 	db := dbcore.GetDBInstance()
@@ -50,16 +54,9 @@ func ListCronTasks(c *gin.Context) {
 
 	now := time.Now().UTC()
 	for i := range tasks {
-		if tasks[i].Enabled {
-			interval := tasks[i].IntervalMinutes
-			if interval <= 0 {
-				interval = 30
-			}
+		if tasks[i].Enabled && needsNextRunRecalc(&tasks[i], now) {
 			// 自动校准滞后或异常倒挂的下次调度时间（纯内存计算返回，避免高频并发 GET 请求对单连接 SQLite 造成写锁饥饿与整体卡死）
-			if tasks[i].NextRunAt == nil || tasks[i].NextRunAt.Before(now) || (tasks[i].LastRunAt != nil && !tasks[i].NextRunAt.After(*tasks[i].LastRunAt)) {
-				nextRun := now.Add(time.Duration(interval) * time.Minute)
-				tasks[i].NextRunAt = &nextRun
-			}
+			tasks[i].NextRunAt = utils.ComputeNextCronRun(&tasks[i], now)
 		}
 	}
 
@@ -97,6 +94,12 @@ func CreateCronTask(c *gin.Context) {
 	if scheduleType == "" {
 		scheduleType = "preset"
 	}
+	if scheduleType == "cron" {
+		if err := utils.ValidateCronSpec(input.CronExpression); err != nil {
+			api.RespondError(c, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
 
 	enabled := true
 	if input.Enabled != nil {
@@ -114,22 +117,20 @@ func CreateCronTask(c *gin.Context) {
 	}
 
 	now := time.Now().UTC()
-	nextRun := now.Add(time.Duration(interval) * time.Minute)
-
 	task := models.CronTask{
 		Id:              taskID,
 		Name:            input.Name,
 		Command:         input.Command,
 		ScheduleType:    scheduleType,
 		IntervalMinutes: interval,
-		CronExpression:  input.CronExpression,
+		CronExpression:  strings.TrimSpace(input.CronExpression),
 		TargetNodes:     targetNodes,
 		Enabled:         enabled,
 		NotifyOnFailure: notifyOnFailure,
-		NextRunAt:       &nextRun,
 		CreatedAt:       now,
 		UpdatedAt:       now,
 	}
+	task.NextRunAt = utils.ComputeNextCronRun(&task, now)
 
 	db := dbcore.GetDBInstance()
 	if err := db.Create(&task).Error; err != nil {
@@ -176,30 +177,40 @@ func UpdateCronTask(c *gin.Context) {
 		if input.NotifyOnFailure != nil {
 			notifyOnFailure = *input.NotifyOnFailure
 		}
+		if scheduleType == "cron" {
+			if err := utils.ValidateCronSpec(input.CronExpression); err != nil {
+				api.RespondError(c, http.StatusBadRequest, err.Error())
+				return
+			}
+		}
 		targetNodes := input.TargetNodes
 		if len(targetNodes) == 0 {
 			targetNodes = models.StringArray{"all"}
 		}
-		nextRun := now.Add(time.Duration(interval) * time.Minute)
 		task = &models.CronTask{
 			Id:              id,
 			Name:            input.Name,
 			Command:         input.Command,
 			ScheduleType:    scheduleType,
 			IntervalMinutes: interval,
-			CronExpression:  input.CronExpression,
+			CronExpression:  strings.TrimSpace(input.CronExpression),
 			TargetNodes:     targetNodes,
 			Enabled:         enabled,
 			NotifyOnFailure: notifyOnFailure,
-			NextRunAt:       &nextRun,
 			CreatedAt:       now,
 			UpdatedAt:       now,
 		}
+		task.NextRunAt = utils.ComputeNextCronRun(task, now)
 		if err := db.Create(task).Error; err != nil {
 			api.RespondError(c, http.StatusInternalServerError, "Failed to save task: "+err.Error())
 			return
 		}
 	} else {
+		oldScheduleType := task.ScheduleType
+		oldInterval := task.IntervalMinutes
+		oldCron := task.CronExpression
+		oldEnabled := task.Enabled
+
 		if strings.TrimSpace(input.Name) != "" {
 			task.Name = input.Name
 		}
@@ -212,8 +223,17 @@ func UpdateCronTask(c *gin.Context) {
 		if input.IntervalMinutes > 0 {
 			task.IntervalMinutes = input.IntervalMinutes
 		}
-		task.CronExpression = input.CronExpression
-		if input.TargetNodes != nil {
+		if task.ScheduleType == "cron" {
+			cronExpr := strings.TrimSpace(input.CronExpression)
+			if err := utils.ValidateCronSpec(cronExpr); err != nil {
+				api.RespondError(c, http.StatusBadRequest, err.Error())
+				return
+			}
+			task.CronExpression = cronExpr
+		} else {
+			task.CronExpression = strings.TrimSpace(input.CronExpression)
+		}
+		if len(input.TargetNodes) > 0 {
 			task.TargetNodes = input.TargetNodes
 		}
 		if input.Enabled != nil {
@@ -224,13 +244,12 @@ func UpdateCronTask(c *gin.Context) {
 		}
 		if task.Enabled {
 			now := time.Now().UTC()
-			interval := task.IntervalMinutes
-			if interval <= 0 {
-				interval = 30
-			}
-			if task.NextRunAt == nil || task.NextRunAt.Before(now) || (task.LastRunAt != nil && !task.NextRunAt.After(*task.LastRunAt)) {
-				nextRun := now.Add(time.Duration(interval) * time.Minute)
-				task.NextRunAt = &nextRun
+			scheduleChanged := oldScheduleType != task.ScheduleType ||
+				oldInterval != task.IntervalMinutes ||
+				oldCron != task.CronExpression ||
+				!oldEnabled
+			if scheduleChanged || needsNextRunRecalc(task, now) {
+				task.NextRunAt = utils.ComputeNextCronRun(task, now)
 			}
 		} else {
 			task.NextRunAt = nil
@@ -307,13 +326,8 @@ func ToggleCronTask(c *gin.Context) {
 	}
 	if task.Enabled {
 		now := time.Now().UTC()
-		interval := task.IntervalMinutes
-		if interval <= 0 {
-			interval = 30
-		}
-		if task.NextRunAt == nil || task.NextRunAt.Before(now) || (task.LastRunAt != nil && !task.NextRunAt.After(*task.LastRunAt)) {
-			nextRun := now.Add(time.Duration(interval) * time.Minute)
-			task.NextRunAt = &nextRun
+		if needsNextRunRecalc(task, now) {
+			task.NextRunAt = utils.ComputeNextCronRun(task, now)
 		}
 	} else {
 		task.NextRunAt = nil

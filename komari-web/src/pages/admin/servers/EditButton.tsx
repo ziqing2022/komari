@@ -22,14 +22,14 @@ export default function EditButton({ node }: { node: NodeDetail }) {
   const [hidden, setHidden] = useState(false);
   const [saving, setSaving] = useState(false);
   const [traffic_limit, setTrafficLimit] = useState(0);
-  const [traffic_limit_type, setTrafficLimitType] = useState("sum");
+  const [traffic_limit_type, setTrafficLimitType] = useState("max");
   const [trafficLimitInput, setTrafficLimitInput] = useState("0 B");
   const [trafficLimitInvalid, setTrafficLimitInvalid] = useState(false);
 
   React.useEffect(() => {
     setHidden(node.hidden);
     setTrafficLimit(node.traffic_limit || 0);
-    setTrafficLimitType(node.traffic_limit_type || "sum");
+    setTrafficLimitType(node.traffic_limit_type || "max");
     setTrafficLimitInput(formatBytes(node.traffic_limit || 0));
     setTrafficLimitInvalid(false);
   }, [node.hidden, node.traffic_limit, node.traffic_limit_type]);
@@ -159,6 +159,7 @@ export default function EditButton({ node }: { node: NodeDetail }) {
             <SettingCardSelect
               bordless
               title={t("admin.nodeEdit.trafficLimitType")}
+              value={traffic_limit_type}
               defaultValue={node.traffic_limit_type || "max"}
               options={[
                 {

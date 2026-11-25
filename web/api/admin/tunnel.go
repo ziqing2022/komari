@@ -33,26 +33,40 @@ type TunnelRuleInput struct {
 	AutoOpenFirewall *bool  `json:"auto_open_firewall"`
 	Enabled          *bool  `json:"enabled"`
 
-	// 高级协议专用字段
-	UUID         string `json:"uuid"`
-	Password     string `json:"password"`
-	Username     string `json:"username"`
-	Method       string `json:"method"`
-	SNI          string `json:"sni"`
-	PrivateKey   string `json:"private_key"`
-	PublicKey    string `json:"public_key"`
-	ShortID      string `json:"short_id"`
-	Fingerprint  string `json:"fingerprint"`
-	ObfsPassword string `json:"obfs_password"`
-	ObfsType     string `json:"obfs_type"`
+	// 高级协议专用字段（指针区分“未传”与“显式清空”）
+	UUID         *string `json:"uuid"`
+	Password     *string `json:"password"`
+	Username     *string `json:"username"`
+	Method       string  `json:"method"`
+	SNI          *string `json:"sni"`
+	PrivateKey   *string `json:"private_key"`
+	PublicKey    *string `json:"public_key"`
+	ShortID      *string `json:"short_id"`
+	Fingerprint  string  `json:"fingerprint"`
+	ObfsPassword *string `json:"obfs_password"`
+	ObfsType     string  `json:"obfs_type"`
 
 	// 跨节点反向穿透专用字段
-	IsReverse        *bool  `json:"is_reverse"`
-	BridgeClientUUID string `json:"bridge_client_uuid"`
-	BridgeHost       string `json:"bridge_host"`
-	BridgePort       int    `json:"bridge_port"`
-	ControlPort      int    `json:"control_port"`
-	TunnelSecret     string `json:"tunnel_secret"`
+	IsReverse        *bool   `json:"is_reverse"`
+	BridgeClientUUID *string `json:"bridge_client_uuid"`
+	BridgeHost       *string `json:"bridge_host"`
+	BridgePort       int     `json:"bridge_port"`
+	ControlPort      int     `json:"control_port"`
+	TunnelSecret     *string `json:"tunnel_secret"`
+}
+
+func derefString(p *string) string {
+	if p == nil {
+		return ""
+	}
+	return *p
+}
+
+func derefTrimmed(p *string) string {
+	if p == nil {
+		return ""
+	}
+	return strings.TrimSpace(*p)
 }
 
 // ListTunnels 获取指定节点或全部节点的隧道与代理规则列表
@@ -169,8 +183,8 @@ func CreateTunnel(c *gin.Context) {
 	if input.IsReverse != nil {
 		isReverse = *input.IsReverse
 	}
-	bridgeClientUUID := strings.TrimSpace(input.BridgeClientUUID)
-	bridgeHost := strings.TrimSpace(input.BridgeHost)
+	bridgeClientUUID := derefTrimmed(input.BridgeClientUUID)
+	bridgeHost := derefTrimmed(input.BridgeHost)
 	bridgePort := input.BridgePort
 	if isReverse && bridgePort <= 0 {
 		bridgePort = input.ListenPort
@@ -187,11 +201,18 @@ func CreateTunnel(c *gin.Context) {
 		api.RespondError(c, http.StatusBadRequest, "Control port must be between 1 and 65535")
 		return
 	}
-	tunnelSecret := strings.TrimSpace(input.TunnelSecret)
+	tunnelSecret := derefTrimmed(input.TunnelSecret)
 	if isReverse && tunnelSecret == "" {
 		secBytes := make([]byte, 16)
 		_, _ = rand.Read(secBytes)
 		tunnelSecret = hex.EncodeToString(secBytes)
+	}
+	if !isReverse {
+		bridgeClientUUID = ""
+		bridgeHost = ""
+		bridgePort = 0
+		controlPort = 0
+		tunnelSecret = ""
 	}
 
 	db := dbcore.GetDBInstance()
@@ -199,6 +220,9 @@ func CreateTunnel(c *gin.Context) {
 		var bridgeClient models.Client
 		if err := db.Where("uuid = ?", bridgeClientUUID).First(&bridgeClient).Error; err == nil {
 			bridgeHost = bridgeClient.IPv4
+			if bridgeHost == "" {
+				bridgeHost = bridgeClient.IPv6
+			}
 		}
 	}
 
@@ -220,16 +244,16 @@ func CreateTunnel(c *gin.Context) {
 		AutoOpenFirewall: autoOpenFirewall,
 		Enabled:          enabled,
 		Status:           "active",
-		UUID:             input.UUID,
-		Password:         input.Password,
-		Username:         input.Username,
+		UUID:             derefString(input.UUID),
+		Password:         derefString(input.Password),
+		Username:         derefString(input.Username),
 		Method:           input.Method,
-		SNI:              input.SNI,
-		PrivateKey:       input.PrivateKey,
-		PublicKey:        input.PublicKey,
-		ShortID:          input.ShortID,
+		SNI:              derefString(input.SNI),
+		PrivateKey:       derefString(input.PrivateKey),
+		PublicKey:        derefString(input.PublicKey),
+		ShortID:          derefString(input.ShortID),
 		Fingerprint:      input.Fingerprint,
-		ObfsPassword:     input.ObfsPassword,
+		ObfsPassword:     derefString(input.ObfsPassword),
 		ObfsType:         input.ObfsType,
 		IsReverse:        isReverse,
 		BridgeClientUUID: bridgeClientUUID,
@@ -316,36 +340,36 @@ func UpdateTunnel(c *gin.Context) {
 		rule.Enabled = *input.Enabled
 	}
 
-	// 更新高级协议字段
-	if input.UUID != "" {
-		rule.UUID = input.UUID
+	// 更新高级协议字段（显式传空字符串可清空）
+	if input.UUID != nil {
+		rule.UUID = *input.UUID
 	}
-	if input.Password != "" {
-		rule.Password = input.Password
+	if input.Password != nil {
+		rule.Password = *input.Password
 	}
-	if input.Username != "" {
-		rule.Username = input.Username
+	if input.Username != nil {
+		rule.Username = *input.Username
 	}
 	if input.Method != "" {
 		rule.Method = input.Method
 	}
-	if input.SNI != "" {
-		rule.SNI = input.SNI
+	if input.SNI != nil {
+		rule.SNI = *input.SNI
 	}
-	if input.PrivateKey != "" {
-		rule.PrivateKey = input.PrivateKey
+	if input.PrivateKey != nil {
+		rule.PrivateKey = *input.PrivateKey
 	}
-	if input.PublicKey != "" {
-		rule.PublicKey = input.PublicKey
+	if input.PublicKey != nil {
+		rule.PublicKey = *input.PublicKey
 	}
-	if input.ShortID != "" {
-		rule.ShortID = input.ShortID
+	if input.ShortID != nil {
+		rule.ShortID = *input.ShortID
 	}
 	if input.Fingerprint != "" {
 		rule.Fingerprint = input.Fingerprint
 	}
-	if input.ObfsPassword != "" {
-		rule.ObfsPassword = input.ObfsPassword
+	if input.ObfsPassword != nil {
+		rule.ObfsPassword = *input.ObfsPassword
 	}
 	if input.ObfsType != "" {
 		rule.ObfsType = input.ObfsType
@@ -356,34 +380,54 @@ func UpdateTunnel(c *gin.Context) {
 	if input.IsReverse != nil {
 		rule.IsReverse = *input.IsReverse
 	}
-	if input.BridgeClientUUID != "" {
-		rule.BridgeClientUUID = input.BridgeClientUUID
-	}
-	if input.BridgeHost != "" {
-		rule.BridgeHost = input.BridgeHost
-	}
-	if rule.IsReverse && rule.BridgeClientUUID != "" && rule.BridgeClientUUID != "custom" && rule.BridgeHost == "" {
-		var bridgeClient models.Client
-		if err := db.Where("uuid = ?", rule.BridgeClientUUID).First(&bridgeClient).Error; err == nil {
-			rule.BridgeHost = bridgeClient.IPv4
+	if !rule.IsReverse {
+		rule.BridgeClientUUID = ""
+		rule.BridgeHost = ""
+		rule.BridgePort = 0
+		rule.ControlPort = 0
+		rule.TunnelSecret = ""
+	} else {
+		if input.BridgeClientUUID != nil {
+			rule.BridgeClientUUID = strings.TrimSpace(*input.BridgeClientUUID)
 		}
-	}
-	if input.BridgePort > 0 {
-		if input.BridgePort > 65535 {
-			api.RespondError(c, http.StatusBadRequest, "Bridge port must be between 1 and 65535")
-			return
+		if input.BridgeHost != nil {
+			rule.BridgeHost = strings.TrimSpace(*input.BridgeHost)
 		}
-		rule.BridgePort = input.BridgePort
-	}
-	if input.ControlPort > 0 {
-		if input.ControlPort > 65535 {
-			api.RespondError(c, http.StatusBadRequest, "Control port must be between 1 and 65535")
-			return
+		if rule.BridgeClientUUID != "" && rule.BridgeClientUUID != "custom" && rule.BridgeHost == "" {
+			var bridgeClient models.Client
+			if err := db.Where("uuid = ?", rule.BridgeClientUUID).First(&bridgeClient).Error; err == nil {
+				rule.BridgeHost = bridgeClient.IPv4
+				if rule.BridgeHost == "" {
+					rule.BridgeHost = bridgeClient.IPv6
+				}
+			}
 		}
-		rule.ControlPort = input.ControlPort
-	}
-	if input.TunnelSecret != "" {
-		rule.TunnelSecret = input.TunnelSecret
+		if input.BridgePort > 0 {
+			if input.BridgePort > 65535 {
+				api.RespondError(c, http.StatusBadRequest, "Bridge port must be between 1 and 65535")
+				return
+			}
+			rule.BridgePort = input.BridgePort
+		} else if rule.BridgePort <= 0 {
+			rule.BridgePort = rule.ListenPort
+		}
+		if input.ControlPort > 0 {
+			if input.ControlPort > 65535 {
+				api.RespondError(c, http.StatusBadRequest, "Control port must be between 1 and 65535")
+				return
+			}
+			rule.ControlPort = input.ControlPort
+		} else if rule.ControlPort <= 0 {
+			rule.ControlPort = 27888
+		}
+		if input.TunnelSecret != nil {
+			rule.TunnelSecret = strings.TrimSpace(*input.TunnelSecret)
+		}
+		if rule.TunnelSecret == "" {
+			secBytes := make([]byte, 16)
+			_, _ = rand.Read(secBytes)
+			rule.TunnelSecret = hex.EncodeToString(secBytes)
+		}
 	}
 
 	rule.UpdatedAt = time.Now().UTC()

@@ -1,5 +1,7 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { NodeDetailsProvider } from "@/contexts/NodeDetailsContext";
+import { useLiveDataMeta } from "@/contexts/LiveDataContext";
+import { isNodeOnline } from "@/utils/nodeOnline";
 import { Swap } from "@/components/motion";
 import { Skeletonize } from "@/components/ui/skeleton";
 import { PLACEHOLDER_NODES } from "./servers/placeholderNodes";
@@ -20,29 +22,80 @@ const NodeDetailsPage = () => {
 const Layout = () => {
   const { nodeDetail, error, settings, settingsLoading, pending, isEmpty, refresh } =
     useServerList();
+  const { online, hasLiveData } = useLiveDataMeta();
   const [searchTerm, setSearchTerm] = useState("");
+  const [statusFilter, setStatusFilter] = useState<"all" | "online" | "offline">("all");
   const [selectedNodes, setSelectedNodes] = useState<string[]>([]);
-  const filteredNodes = useMemo(
+
+  useEffect(() => {
+    if (pending || !Array.isArray(nodeDetail)) return;
+    const validIds = new Set(nodeDetail.map((n) => n.uuid));
+    setSelectedNodes((prev) => {
+      const next = prev.filter((id) => validIds.has(id));
+      return next.length === prev.length ? prev : next;
+    });
+  }, [nodeDetail, pending]);
+
+  const sortedAllNodes = useMemo(
     () =>
       Array.isArray(nodeDetail)
-        ? nodeDetail
-            .filter((node) =>
-              node.name.toLowerCase().includes(searchTerm.toLowerCase()),
-            )
-            .sort((a, b) => {
-              if (a.weight !== b.weight) {
-                return a.weight - b.weight;
-              }
-              const timeA = new Date(a.created_at || 0).getTime();
-              const timeB = new Date(b.created_at || 0).getTime();
-              if (timeA !== timeB) {
-                return timeA - timeB;
-              }
-              return (a.name || "").localeCompare(b.name || "");
-            })
+        ? [...nodeDetail].sort((a, b) => {
+            if (a.weight !== b.weight) {
+              return a.weight - b.weight;
+            }
+            const timeA = new Date(a.created_at || 0).getTime();
+            const timeB = new Date(b.created_at || 0).getTime();
+            if (timeA !== timeB) {
+              return timeA - timeB;
+            }
+            return (a.name || "").localeCompare(b.name || "");
+          })
         : [],
-    [nodeDetail, searchTerm],
+    [nodeDetail],
   );
+
+  const statusCounts = useMemo(() => {
+    let onlineCount = 0;
+    for (const node of sortedAllNodes) {
+      if (isNodeOnline(node.uuid, online, hasLiveData, (node as any)?.online)) {
+        onlineCount++;
+      }
+    }
+    return {
+      all: sortedAllNodes.length,
+      online: onlineCount,
+      offline: sortedAllNodes.length - onlineCount,
+    };
+  }, [sortedAllNodes, online, hasLiveData]);
+
+  const filteredNodes = useMemo(() => {
+    const query = searchTerm.trim().toLowerCase();
+    return sortedAllNodes.filter((node) => {
+      if (statusFilter !== "all") {
+        const nodeOnline = isNodeOnline(
+          node.uuid,
+          online,
+          hasLiveData,
+          (node as any)?.online,
+        );
+        if (statusFilter === "online" && !nodeOnline) return false;
+        if (statusFilter === "offline" && nodeOnline) return false;
+      }
+      if (!query) return true;
+      return [
+        node.name,
+        node.ipv4,
+        node.ipv6,
+        node.group,
+        node.tags,
+        node.remark,
+        node.public_remark,
+        node.version,
+      ].some((field) => field?.toLowerCase().includes(query));
+    });
+  }, [sortedAllNodes, searchTerm, statusFilter, online, hasLiveData]);
+
+  const isFiltered = Boolean(searchTerm.trim()) || statusFilter !== "all";
 
   if (error) return <div>{error}</div>;
 
@@ -51,6 +104,9 @@ const Layout = () => {
       <Header
         searchTerm={searchTerm}
         setSearchTerm={setSearchTerm}
+        statusFilter={statusFilter}
+        setStatusFilter={setStatusFilter}
+        statusCounts={statusCounts}
         selectedNodes={selectedNodes}
         settings={settings}
         settingsLoading={settingsLoading}
@@ -70,6 +126,7 @@ const Layout = () => {
               // 占位行与真实行 uuid 不同：换一棵子树，让 localNodes 直接从真实数据初始化
               key={pending ? "placeholder" : "data"}
               nodes={pending ? PLACEHOLDER_NODES : filteredNodes}
+              isFiltered={pending ? false : isFiltered}
               selectedNodes={pending ? [] : selectedNodes}
               setSelectedNodes={setSelectedNodes}
               settings={settings}

@@ -2,6 +2,7 @@ import { Button } from "@radix-ui/themes";
 import { useTranslation } from "react-i18next";
 import { Cpu, MemoryStick, RefreshCw } from "lucide-react";
 import { DashboardBoard, DashboardWidget } from "@/components/admin/dashboard/DashboardBoard";
+import { CronDashboardWidget } from "@/components/admin/dashboard/CronDashboardWidget";
 import { ExtraWidget } from "@/components/admin/dashboard/ExtraWidgets";
 import PageHeader from "@/components/PageHeader";
 import { DatabaseWidget } from "./dashboard/DatabaseWidget";
@@ -140,6 +141,7 @@ const DashboardContent = () => {
       <DashboardWidget id="resources"><ExtraWidget kind="resources" nodes={nodeList ?? []} latest={latest} loading={nodesLoading} /></DashboardWidget>
       <DashboardWidget id="disk" supportsLimit>{(limit) => <ExtraWidget kind="disk" nodes={nodeList ?? []} latest={latest} limit={limit} loading={nodesLoading || !loaded.latest} />}</DashboardWidget>
       <DashboardWidget id="shortcuts"><ExtraWidget kind="shortcuts" nodes={nodeList ?? []} latest={latest} /></DashboardWidget>
+      <DashboardWidget id="cron" supportsLimit>{(limit) => <CronDashboardWidget limit={limit} />}</DashboardWidget>
       </DashboardBoard>
     </div>
   );

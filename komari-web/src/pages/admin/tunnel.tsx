@@ -37,6 +37,8 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { NodeDetailsProvider, useNodeDetails, type NodeDetail } from "@/contexts/NodeDetailsContext";
+import { useLiveDataMeta } from "@/contexts/LiveDataContext";
+import { isNodeOnline } from "@/utils/nodeOnline";
 import Loading from "@/components/loading";
 
 export type RuleType = "forward" | "vless" | "socks5" | "shadowsocks" | "trojan" | "hysteria2" | "tuic";
@@ -83,15 +85,46 @@ export interface TunnelRule {
 const LOCAL_STORAGE_KEY = "komari_tunnel_rules";
 const LOCAL_STORAGE_INIT_KEY = "komari_tunnel_initialized";
 
+function formatUriHost(host: string): string {
+  const trimmed = host.trim();
+  if (trimmed.includes(":") && !trimmed.startsWith("[")) {
+    return `[${trimmed}]`;
+  }
+  return trimmed;
+}
+
+function toUtf8Base64(text: string): string {
+  const bytes = new TextEncoder().encode(text);
+  let binary = "";
+  for (const b of bytes) {
+    binary += String.fromCharCode(b);
+  }
+  return btoa(binary);
+}
+
+function genRandomBase64(bytes: number): string {
+  const arr = new Uint8Array(bytes);
+  crypto.getRandomValues(arr);
+  let binary = "";
+  for (const b of arr) {
+    binary += String.fromCharCode(b);
+  }
+  return btoa(binary);
+}
+
 interface ServerComboboxProps {
   nodes: NodeDetail[] | null;
   value: string;
   onChange: (value: string) => void;
   disabled?: boolean;
   placeholder?: string;
+  allowAll?: boolean;
+  allLabel?: string;
   allowCustom?: boolean;
   customLabel?: string;
   filterOutUUID?: string;
+  online?: string[] | null;
+  hasLiveData?: boolean;
 }
 
 const ServerCombobox = ({
@@ -100,9 +133,13 @@ const ServerCombobox = ({
   onChange,
   disabled = false,
   placeholder = "选择服务器节点",
+  allowAll = false,
+  allLabel = "全部节点",
   allowCustom = false,
   customLabel = "自定义公网机器",
   filterOutUUID,
+  online = null,
+  hasLiveData = false,
 }: ServerComboboxProps) => {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
@@ -121,25 +158,39 @@ const ServerCombobox = ({
       const name = (n.name || "").toLowerCase();
       const ipv4 = (n.ipv4 || "").toLowerCase();
       const ipv6 = (n.ipv6 || "").toLowerCase();
+      const group = (n.group || "").toLowerCase();
       const uuid = (n.uuid || "").toLowerCase();
-      return name.includes(q) || ipv4.includes(q) || ipv6.includes(q) || uuid.includes(q);
+      return (
+        name.includes(q) ||
+        ipv4.includes(q) ||
+        ipv6.includes(q) ||
+        group.includes(q) ||
+        uuid.includes(q)
+      );
     });
   }, [availableNodes, query]);
 
   const selectedNode = useMemo(() => {
-    if (!value || value === "custom") return null;
+    if (!value || value === "custom" || value === "all") return null;
     return availableNodes.find((n) => n.uuid === value) || null;
   }, [availableNodes, value]);
 
+  const selectedOnline = selectedNode
+    ? isNodeOnline(selectedNode.uuid, online, hasLiveData, (selectedNode as any)?.online)
+    : false;
+
   const displayLabel = useMemo(() => {
+    if (allowAll && value === "all") {
+      return allLabel || t("tunnel.allServers", "全部节点");
+    }
     if (value === "custom") {
       return customLabel || t("tunnel.customBridgeServer", "自定义公网机器");
     }
     if (selectedNode) {
-      return `${selectedNode.name || selectedNode.uuid} (${selectedNode.ipv4 || t("tunnel.noIPv4", "无 IPv4")})`;
+      return `${selectedNode.name || selectedNode.uuid} (${selectedNode.ipv4 || selectedNode.ipv6 || t("tunnel.noIP", "无 IP")})`;
     }
     return placeholder || t("tunnel.selectServer", "选择服务器节点");
-  }, [value, selectedNode, customLabel, placeholder, t]);
+  }, [allowAll, allLabel, value, selectedNode, customLabel, placeholder, t]);
 
   return (
     <Popover.Root open={open} onOpenChange={setOpen}>
@@ -154,6 +205,12 @@ const ServerCombobox = ({
           <span className="flex items-center gap-2 truncate text-sm">
             {value === "custom" ? (
               <Globe className="w-4 h-4 text-purple-500 shrink-0" />
+            ) : selectedNode ? (
+              <span
+                className={`w-2 h-2 rounded-full shrink-0 ${
+                  selectedOnline ? "bg-emerald-500" : "bg-red-500"
+                }`}
+              />
             ) : (
               <Server className="w-4 h-4 text-gray-400 shrink-0" />
             )}
@@ -178,7 +235,7 @@ const ServerCombobox = ({
         <div className="mb-2">
           <TextField.Root
             size="2"
-            placeholder={t("tunnel.searchServerPlaceholder", "搜索服务器名称或 IP...")}
+            placeholder={t("tunnel.searchServerPlaceholder", "搜索服务器名称、IP 或分组...")}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             autoFocus
@@ -201,6 +258,27 @@ const ServerCombobox = ({
         </div>
 
         <div className="max-h-56 overflow-y-auto space-y-0.5 pr-0.5">
+          {allowAll && (
+            <div
+              onClick={() => {
+                onChange("all");
+                setOpen(false);
+                setQuery("");
+              }}
+              className={`flex items-center justify-between px-2.5 py-1.5 rounded-md text-xs cursor-pointer transition-colors ${
+                value === "all"
+                  ? "bg-blue-50 text-blue-700 dark:bg-blue-950/50 dark:text-blue-300 font-semibold"
+                  : "hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-700 dark:text-gray-300"
+              }`}
+            >
+              <div className="flex items-center gap-2 truncate">
+                <Server className="w-4 h-4 text-blue-500 shrink-0" />
+                <span className="truncate">{allLabel || t("tunnel.allServers", "全部节点")}</span>
+              </div>
+              {value === "all" && <Check className="w-4 h-4 text-blue-600 shrink-0" />}
+            </div>
+          )}
+
           {allowCustom && (
             <div
               onClick={() => {
@@ -229,6 +307,12 @@ const ServerCombobox = ({
           ) : (
             filteredNodes.map((node) => {
               const isSelected = value === node.uuid;
+              const nodeOnline = isNodeOnline(
+                node.uuid,
+                online,
+                hasLiveData,
+                (node as any)?.online
+              );
               return (
                 <div
                   key={node.uuid}
@@ -243,11 +327,19 @@ const ServerCombobox = ({
                       : "hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-700 dark:text-gray-300"
                   }`}
                 >
-                  <div className="flex flex-col truncate mr-2">
-                    <span className="truncate font-medium">{node.name || node.uuid}</span>
-                    <span className="text-[11px] text-gray-400 truncate">
-                      {node.ipv4 || node.ipv6 || t("tunnel.noIP", "无 IP")}
-                    </span>
+                  <div className="flex items-center gap-2 truncate mr-2">
+                    <span
+                      className={`w-2 h-2 rounded-full shrink-0 ${
+                        nodeOnline ? "bg-emerald-500" : "bg-red-500"
+                      }`}
+                      title={nodeOnline ? t("common.online", "在线") : t("common.offline", "离线")}
+                    />
+                    <div className="flex flex-col truncate">
+                      <span className="truncate font-medium">{node.name || node.uuid}</span>
+                      <span className="text-[11px] text-gray-400 truncate">
+                        {node.ipv4 || node.ipv6 || t("tunnel.noIP", "无 IP")}
+                      </span>
+                    </div>
                   </div>
                   {isSelected && <Check className="w-4 h-4 text-blue-600 shrink-0" />}
                 </div>
@@ -271,6 +363,7 @@ const TunnelPage = () => {
 const TunnelContent = () => {
   const { t } = useTranslation();
   const { nodeDetail } = useNodeDetails();
+  const { online, hasLiveData } = useLiveDataMeta();
 
   const [tunnels, setTunnels] = useState<TunnelRule[]>([]);
   const [loading, setLoading] = useState(true);
@@ -368,6 +461,7 @@ const TunnelContent = () => {
   // Fetch Tunnels
   const loadTunnels = async () => {
     setLoading(true);
+    let apiErrorMsg = "";
     try {
       const res = await fetch("/api/admin/tunnel");
       if (res.ok) {
@@ -385,11 +479,18 @@ const TunnelContent = () => {
           localStorage.setItem(LOCAL_STORAGE_INIT_KEY, "true");
           return;
         }
+      } else {
+        apiErrorMsg = `HTTP ${res.status}`;
       }
-    } catch (e) {
+    } catch (e: any) {
+      apiErrorMsg = e?.message || "network error";
       console.warn("Failed to load tunnels from API, falling back to local storage", e);
     } finally {
       setLoading(false);
+    }
+
+    if (apiErrorMsg) {
+      toast.error(t("tunnel.loadFailed", `加载隧道规则失败（${apiErrorMsg}），显示本地缓存`));
     }
 
     // Fallback: Read from localStorage
@@ -473,7 +574,7 @@ const TunnelContent = () => {
 
     setFormUUID(genUUID());
     setFormShortID(genHex(4));
-    setFormPassword(genHex(8));
+    setFormPassword(genRandomBase64(16));
     if (!formSNI) setFormSNI("gateway.icloud.com");
     if (!silent) {
       toast.success(t("tunnel.toastCredentialsGenerated", "已成功生成随机凭据与密钥对"));
@@ -657,6 +758,13 @@ const TunnelContent = () => {
       toast.error(t("tunnel.toastReverseRequiresBridgeHost", "跨机反向穿透模式必须填写或选择中转机公网地址"));
       return;
     }
+    if (formIsReverse && formControlPort !== "") {
+      const ctrlPortNum = Number(formControlPort);
+      if (!ctrlPortNum || ctrlPortNum < 1 || ctrlPortNum > 65535) {
+        toast.error(t("tunnel.toastEnterValidControlPort", "请输入有效的控制通道端口（1-65535）"));
+        return;
+      }
+    }
 
     const clean2FaCode = form2FaCode.replace(/[\s-]/g, "").trim();
     if (twoFaEnabled && !clean2FaCode) {
@@ -689,11 +797,11 @@ const TunnelContent = () => {
       obfs_type: "salamander",
 
       is_reverse: formIsReverse,
-      bridge_client_uuid: formBridgeClientUUID,
-      bridge_host: formBridgeHost.trim(),
-      bridge_port: formIsReverse ? Number(formBridgePort) || listenPortNum : undefined,
-      control_port: formIsReverse ? Number(formControlPort) || 27888 : undefined,
-      tunnel_secret: formTunnelSecret.trim(),
+      bridge_client_uuid: formIsReverse ? formBridgeClientUUID : "",
+      bridge_host: formIsReverse ? formBridgeHost.trim() : "",
+      bridge_port: formIsReverse ? Number(formBridgePort) || listenPortNum : 0,
+      control_port: formIsReverse ? Number(formControlPort) || 27888 : 0,
+      tunnel_secret: formIsReverse ? formTunnelSecret.trim() : "",
     };
 
     try {
@@ -849,39 +957,49 @@ const TunnelContent = () => {
       targetPort = rule.bridge_port || rule.listen_port;
     }
 
+    const uriHost = formatUriHost(targetHost);
     let shareLink = "";
     const ruleType = rule.rule_type || "forward";
     const nameTag = encodeURIComponent(rule.name);
 
     if (ruleType === "vless") {
-      const sni = rule.sni || "gateway.icloud.com";
-      const pbk = rule.public_key || "";
-      const sid = rule.short_id || "";
-      const fp = rule.fingerprint || "ios";
-      shareLink = `vless://${rule.uuid}@${targetHost}:${targetPort}?encryption=none&flow=xtls-rprx-vision&security=reality&sni=${sni}&fp=${fp}&pbk=${pbk}&sid=${sid}&type=tcp#${nameTag}`;
+      const sni = encodeURIComponent(rule.sni || "gateway.icloud.com");
+      const pbk = encodeURIComponent(rule.public_key || "");
+      const sid = encodeURIComponent(rule.short_id || "");
+      const fp = encodeURIComponent(rule.fingerprint || "ios");
+      const uuid = encodeURIComponent(rule.uuid || "");
+      shareLink = `vless://${uuid}@${uriHost}:${targetPort}?encryption=none&flow=xtls-rprx-vision&security=reality&sni=${sni}&fp=${fp}&pbk=${pbk}&sid=${sid}&type=tcp#${nameTag}`;
     } else if (ruleType === "tuic") {
-      const sni = rule.sni || "gateway.icloud.com";
-      shareLink = `tuic://${rule.uuid}:${rule.password}@${targetHost}:${targetPort}?congestion_control=bbr&alpn=h3&sni=${sni}&udp_relay_mode=native&allow_insecure=1&skip-cert-verify=true&insecure=1#${nameTag}`;
+      const sni = encodeURIComponent(rule.sni || "gateway.icloud.com");
+      const uuid = encodeURIComponent(rule.uuid || "");
+      const pwd = encodeURIComponent(rule.password || "");
+      shareLink = `tuic://${uuid}:${pwd}@${uriHost}:${targetPort}?congestion_control=bbr&alpn=h3&sni=${sni}&udp_relay_mode=native&allow_insecure=1&skip-cert-verify=true&insecure=1#${nameTag}`;
     } else if (ruleType === "hysteria2") {
-      const sni = rule.sni || "gateway.icloud.com";
-      const obfs = rule.obfs_password ? `&obfs=salamander&obfs-password=${rule.obfs_password}` : "";
-      shareLink = `hysteria2://${rule.password}@${targetHost}:${targetPort}?sni=${sni}&insecure=1&allow_insecure=1&skip-cert-verify=true${obfs}#${nameTag}`;
+      const sni = encodeURIComponent(rule.sni || "gateway.icloud.com");
+      const pwd = encodeURIComponent(rule.password || "");
+      const obfs = rule.obfs_password
+        ? `&obfs=salamander&obfs-password=${encodeURIComponent(rule.obfs_password)}`
+        : "";
+      shareLink = `hysteria2://${pwd}@${uriHost}:${targetPort}?sni=${sni}&insecure=1&allow_insecure=1&skip-cert-verify=true${obfs}#${nameTag}`;
     } else if (ruleType === "socks5") {
       if (rule.password) {
-        shareLink = `socks5://${rule.username || "komari"}:${rule.password}@${targetHost}:${targetPort}#${nameTag}`;
+        const user = encodeURIComponent(rule.username || "komari");
+        const pwd = encodeURIComponent(rule.password);
+        shareLink = `socks5://${user}:${pwd}@${uriHost}:${targetPort}#${nameTag}`;
       } else {
-        shareLink = `socks5://${targetHost}:${targetPort}#${nameTag}`;
+        shareLink = `socks5://${uriHost}:${targetPort}#${nameTag}`;
       }
     } else if (ruleType === "shadowsocks") {
       const method = rule.method || "2022-blake3-aes-128-gcm";
-      const userinfo = btoa(`${method}:${rule.password}`);
-      shareLink = `ss://${userinfo}@${targetHost}:${targetPort}#${nameTag}`;
+      const userinfo = toUtf8Base64(`${method}:${rule.password || ""}`);
+      shareLink = `ss://${userinfo}@${uriHost}:${targetPort}#${nameTag}`;
     } else if (ruleType === "trojan") {
-      const sni = rule.sni || "gateway.icloud.com";
-      shareLink = `trojan://${rule.password}@${targetHost}:${targetPort}?security=tls&sni=${sni}#${nameTag}`;
+      const sni = encodeURIComponent(rule.sni || "gateway.icloud.com");
+      const pwd = encodeURIComponent(rule.password || "");
+      shareLink = `trojan://${pwd}@${uriHost}:${targetPort}?security=tls&sni=${sni}#${nameTag}`;
     } else {
       // forward
-      shareLink = `${targetHost}:${targetPort}`;
+      shareLink = `${uriHost}:${targetPort}`;
     }
 
     navigator.clipboard.writeText(shareLink);
@@ -974,22 +1092,17 @@ const TunnelContent = () => {
           </div>
 
           <div className="grid grid-cols-2 gap-2 w-full sm:w-auto sm:flex sm:items-center">
-            <div className="w-full sm:w-44">
-              <Select.Root
+            <div className="w-full sm:w-56">
+              <ServerCombobox
+                nodes={nodeDetail}
                 value={selectedServerFilter}
-                onValueChange={setSelectedServerFilter}
-              >
-                <Select.Trigger className="w-full" placeholder={t("tunnel.filterByServer", "按节点筛选")} />
-                <Select.Content>
-                  <Select.Item value="all">{t("tunnel.allServers", "全部节点")}</Select.Item>
-                  {nodeDetail &&
-                    nodeDetail.map((node) => (
-                      <Select.Item key={node.uuid} value={node.uuid}>
-                        {node.name || node.uuid}
-                      </Select.Item>
-                    ))}
-                </Select.Content>
-              </Select.Root>
+                onChange={setSelectedServerFilter}
+                placeholder={t("tunnel.filterByServer", "按节点筛选")}
+                allowAll
+                allLabel={t("tunnel.allServers", "全部节点")}
+                online={online}
+                hasLiveData={hasLiveData}
+              />
             </div>
 
             <div className="w-full sm:w-36">
@@ -1047,6 +1160,24 @@ const TunnelContent = () => {
           {filteredTunnels.map((rule) => {
             const server = serverMap.get(rule.client_uuid);
             const serverName = server?.name || rule.client_uuid;
+            const serverOnline = isNodeOnline(
+              rule.client_uuid,
+              online,
+              hasLiveData,
+              (server as any)?.online
+            );
+            const bridgeServer =
+              rule.bridge_client_uuid && rule.bridge_client_uuid !== "custom"
+                ? serverMap.get(rule.bridge_client_uuid)
+                : undefined;
+            const bridgeOnline = bridgeServer
+              ? isNodeOnline(
+                  rule.bridge_client_uuid,
+                  online,
+                  hasLiveData,
+                  (bridgeServer as any)?.online
+                )
+              : true;
             const ruleType = rule.rule_type || "forward";
 
             return (
@@ -1059,10 +1190,21 @@ const TunnelContent = () => {
                         {rule.name}
                       </Text>
 
-                      <Badge color="blue" variant="soft" className="flex items-center gap-1">
+                      <Badge color="blue" variant="soft" className="flex items-center gap-1.5">
+                        <span
+                          className={`w-2 h-2 rounded-full shrink-0 ${
+                            serverOnline ? "bg-emerald-500" : "bg-red-500"
+                          }`}
+                        />
                         <Server className="w-3 h-3" />
-                        {serverName}
+                        <span>{serverName}</span>
                       </Badge>
+
+                      {(!serverOnline || (rule.is_reverse && !bridgeOnline)) && (
+                        <Badge color="amber" variant="soft">
+                          {t("tunnel.offlinePendingSync", "节点离线 · 待上线同步")}
+                        </Badge>
+                      )}
 
                       {/* Protocol Badge */}
                       {ruleType === "vless" && (
@@ -1466,12 +1608,14 @@ const TunnelContent = () => {
                       nodes={nodeDetail}
                       value={formBridgeClientUUID}
                       filterOutUUID={formClientUUID}
+                      online={online}
+                      hasLiveData={hasLiveData}
                       onChange={(val) => {
                         setFormBridgeClientUUID(val);
                         if (val !== "custom") {
                           const node = serverMap.get(val);
-                          if (node?.ipv4) {
-                            setFormBridgeHost(node.ipv4);
+                          if (node?.ipv4 || node?.ipv6) {
+                            setFormBridgeHost(node.ipv4 || node.ipv6 || "");
                           }
                         } else {
                           setFormBridgeHost("");
@@ -1503,6 +1647,41 @@ const TunnelContent = () => {
                         placeholder={t("tunnel.bridgePortPlaceholder", "例如: 20988 或 10085")}
                         value={formBridgePort}
                         onChange={(e) => setFormBridgePort(e.target.value === "" ? "" : Number(e.target.value))}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <div>
+                      <span className="text-xs font-semibold text-gray-700 dark:text-gray-300 block mb-1">
+                        {t("tunnel.controlPort", "控制通道端口")}
+                      </span>
+                      <TextField.Root
+                        type="number"
+                        placeholder="27888"
+                        value={formControlPort}
+                        onChange={(e) => setFormControlPort(e.target.value === "" ? "" : Number(e.target.value))}
+                      />
+                    </div>
+                    <div>
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-xs font-semibold text-gray-700 dark:text-gray-300">
+                          {t("tunnel.tunnelSecret", "穿透握手密钥")}
+                        </span>
+                        <Button
+                          size="1"
+                          variant="ghost"
+                          type="button"
+                          onClick={() => setFormTunnelSecret(genRandomBase64(16))}
+                        >
+                          <Sparkles className="w-3 h-3 mr-1" />
+                          {t("tunnel.randomGenerate", "随机生成")}
+                        </Button>
+                      </div>
+                      <TextField.Root
+                        placeholder={t("tunnel.tunnelSecretPlaceholder", "留空由服务端自动生成")}
+                        value={formTunnelSecret}
+                        onChange={(e) => setFormTunnelSecret(e.target.value)}
                       />
                     </div>
                   </div>
@@ -1713,7 +1892,7 @@ const TunnelContent = () => {
                   </div>
                   <div className="w-full sm:w-44 shrink-0">
                     <Select.Root
-                      value=""
+                      value={CURATED_SNIS.some((s) => s.domain === formSNI) ? formSNI : undefined}
                       onValueChange={(val) => {
                         if (val) {
                           setFormSNI(val);
@@ -1733,6 +1912,10 @@ const TunnelContent = () => {
                     </Select.Root>
                   </div>
                 </div>
+
+                <Text size="1" color="gray" className="block">
+                  {t("tunnel.sniProbePanelHint", "提示：一键测活从面板服务器发起 TLS 1.3 握手探测，仅供节点伪装域名参考。")}
+                </Text>
 
                 {sniProbeResult && (
                   <div className="text-xs flex items-center gap-2 mt-1">

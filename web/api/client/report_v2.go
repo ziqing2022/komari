@@ -298,10 +298,22 @@ func handleCronTaskResult(taskID, uuid string, exitCode int, result string) {
 	if err := db.Where("id = ? OR id = ? OR id = ? OR id = ?", cronId, "cron-"+bareID, "task-"+bareID, bareID).First(&task).Error; err == nil {
 		now := time.Now().UTC()
 		updates := map[string]interface{}{
-			"last_exit_code": exitCode,
-			"last_result":    result,
-			"last_run_at":    now,
-			"updated_at":     now,
+			"last_run_at": now,
+			"updated_at":  now,
+		}
+		if exitCode != 0 {
+			updates["last_exit_code"] = exitCode
+			updates["last_result"] = result
+		} else {
+			// 多节点同批次执行时，若同批次内已有节点失败，不得被后续成功节点的 exit_code=0 覆盖
+			var failedCount int64
+			_ = db.Model(&models.TaskResult{}).
+				Where("task_id = ? AND exit_code IS NOT NULL AND exit_code != 0", taskID).
+				Count(&failedCount).Error
+			if failedCount == 0 {
+				updates["last_exit_code"] = 0
+				updates["last_result"] = result
+			}
 		}
 		_ = db.Model(&task).Updates(updates).Error
 

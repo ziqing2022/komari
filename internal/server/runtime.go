@@ -7,19 +7,23 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/komari-monitor/komari/cmd/flags"
 	"github.com/komari-monitor/komari/database"
 	"github.com/komari-monitor/komari/database/accounts"
 	"github.com/komari-monitor/komari/database/auditlog"
+	"github.com/komari-monitor/komari/database/dbcore"
 	"github.com/komari-monitor/komari/database/tasks"
 	"github.com/komari-monitor/komari/internal/config"
 	"github.com/komari-monitor/komari/internal/lifecycle"
 	"github.com/komari-monitor/komari/internal/metricstore"
 	"github.com/komari-monitor/komari/internal/plugin"
 	"github.com/komari-monitor/komari/internal/scheduler"
+	"github.com/komari-monitor/komari/utils"
 	"github.com/komari-monitor/komari/utils/geoip"
 	logger "github.com/komari-monitor/komari/utils/log"
 	"github.com/komari-monitor/komari/utils/notifier"
@@ -186,8 +190,12 @@ func (a *App) runCleanups(ctx context.Context) error {
 }
 
 func registerScheduledWork() {
+	utils.OnCronFailure = notifier.NotifyCronFailure
 	if err := tasks.ReloadPingSchedule(); err != nil {
 		logger.ErrorArgs("server", "Failed to reload ping schedule:", err)
+	}
+	if err := tasks.ReloadCronSchedule(); err != nil {
+		logger.ErrorArgs("server", "Failed to reload cron schedule:", err)
 	}
 	if err := scheduler.AddFunc("records:cleanup", "@every 30m", cleanupScheduledData); err != nil {
 		logger.ErrorArgs("server", "Failed to add cleanup scheduled task:", err)
@@ -204,17 +212,111 @@ func registerScheduledWork() {
 	if err := scheduler.AddFunc("notifier:expire", "0 0 9 * * *", notifier.CheckExpire); err != nil {
 		logger.ErrorArgs("server", "Failed to add expire notification task:", err)
 	}
+	// 每天凌晨 03:30 执行一次主数据库自动瘦身与空间回收（VACUUM）
+	if err := scheduler.AddContextFunc("database:maintenance", "0 30 3 * * *", true, scheduledDatabaseMaintenance); err != nil {
+		logger.ErrorArgs("server", "Failed to add database maintenance scheduled task:", err)
+	}
+
+	// 启动后延迟清理历史定时任务日志，并在主库体积过高时自动执行空间回收
+	go func() {
+		time.Sleep(10 * time.Second)
+		_ = tasks.CleanCronTaskHistory(2)
+		if flags.IsSQLite() {
+			if size, err := dbcore.StorageSize(); err == nil && size > 80*1024*1024 {
+				logger.Infof("server", "[db-maintenance] Database size is %.2f MB (>80MB threshold), automatically triggering initial space reclamation", float64(size)/(1024*1024))
+				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+				defer cancel()
+				scheduledDatabaseMaintenance(ctx)
+			}
+		}
+	}()
 }
 
-const taskResultRetentionDays = 30
+var (
+	lastAutoVacuumTime time.Time
+	autoVacuumRunning  bool
+	autoVacuumMu       sync.Mutex
+)
 
-func cleanupScheduledData() {
-	before := time.Now().UTC().Add(-24 * time.Hour * taskResultRetentionDays)
+func tryTriggerAutoVacuum() {
+	if !flags.IsSQLite() {
+		return
+	}
+	size, err := dbcore.StorageSize()
+	if err != nil || size <= 80*1024*1024 {
+		return
+	}
+	autoVacuumMu.Lock()
+	shouldRun := !autoVacuumRunning && time.Since(lastAutoVacuumTime) > 6*time.Hour
+	autoVacuumMu.Unlock()
+	if !shouldRun {
+		return
+	}
+
+	logger.Infof("server", "[db-maintenance] Database size is %.2f MB (>80MB threshold), automatically triggering space reclamation", float64(size)/(1024*1024))
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+		defer cancel()
+		scheduledDatabaseMaintenance(ctx)
+	}()
+}
+
+func scheduledDatabaseMaintenance(ctx context.Context) {
+	autoVacuumMu.Lock()
+	if autoVacuumRunning {
+		autoVacuumMu.Unlock()
+		return
+	}
+	autoVacuumRunning = true
+	autoVacuumMu.Unlock()
+
+	defer func() {
+		autoVacuumMu.Lock()
+		autoVacuumRunning = false
+		autoVacuumMu.Unlock()
+	}()
+
+	logger.Infof("server", "[db-maintenance] Starting scheduled database cleanup and vacuum...")
+	cleanupScheduledDataCore()
+
+	if flags.IsSQLite() {
+		beforeSize, _ := dbcore.StorageSize()
+		if err := dbcore.ReclaimSpace(ctx); err != nil {
+			logger.Errorf("server", "[db-maintenance] Failed to reclaim database space: %v", err)
+			return
+		}
+		afterSize, _ := dbcore.StorageSize()
+		autoVacuumMu.Lock()
+		lastAutoVacuumTime = time.Now().UTC()
+		autoVacuumMu.Unlock()
+		logger.Infof("server", "[db-maintenance] Database maintenance completed: before %.2f MB, after %.2f MB (freed %.2f MB)",
+			float64(beforeSize)/(1024*1024),
+			float64(afterSize)/(1024*1024),
+			float64(beforeSize-afterSize)/(1024*1024))
+	}
+}
+
+const defaultTaskResultRetentionDays = 7
+
+func cleanupScheduledDataCore() {
+	dbcore.DropLegacyTablesIfExist()
+
+	retentionDays := defaultTaskResultRetentionDays
+	if customDays, err := config.GetAs[int]("task_retention_days", defaultTaskResultRetentionDays); err == nil && customDays > 0 {
+		retentionDays = customDays
+	}
+	before := time.Now().UTC().Add(-24 * time.Hour * time.Duration(retentionDays))
 	if err := tasks.ClearTaskResultsByTimeBefore(before); err != nil {
 		logger.Errorf("server", "Failed to clean expired task results: %v", err)
 	}
+	_ = tasks.CleanCronTaskHistory(2)
 	auditlog.RemoveOldLogs()
 	accounts.RemoveExpiredSessions()
+}
+
+func cleanupScheduledData() {
+	cleanupScheduledDataCore()
+	tryTriggerAutoVacuum()
 }
 
 func compactMetricStore(ctx context.Context) {

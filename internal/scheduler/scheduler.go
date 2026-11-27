@@ -84,6 +84,12 @@ func AddContextFunc(name string, spec string, runImmediately bool, fn Func) erro
 	return defaultManager.AddContextFunc(name, spec, runImmediately, fn)
 }
 
+// AddContextFuncAt 注册一个任务，并在指定的 firstRun 时刻触发首次执行，随后按 spec 周期继续运行。
+// 若 firstRun 为零值或已过期，则回退到常规调度行为。
+func AddContextFuncAt(name string, spec string, firstRun time.Time, fn Func) error {
+	return defaultManager.AddContextFuncAt(name, spec, firstRun, fn)
+}
+
 func Every(duration time.Duration) string {
 	return "@every " + duration.String()
 }
@@ -105,6 +111,14 @@ func (m *Manager) AddFunc(name string, spec string, fn func()) error {
 }
 
 func (m *Manager) AddContextFunc(name string, spec string, runImmediately bool, fn Func) error {
+	return m.addContextFuncWithFirstRun(name, spec, runImmediately, time.Time{}, fn)
+}
+
+func (m *Manager) AddContextFuncAt(name string, spec string, firstRun time.Time, fn Func) error {
+	return m.addContextFuncWithFirstRun(name, spec, false, firstRun, fn)
+}
+
+func (m *Manager) addContextFuncWithFirstRun(name string, spec string, runImmediately bool, firstRun time.Time, fn Func) error {
 	if name == "" {
 		return fmt.Errorf("corn job name is empty")
 	}
@@ -119,7 +133,7 @@ func (m *Manager) AddContextFunc(name string, spec string, runImmediately bool, 
 	ctx, cancel := context.WithCancel(context.Background())
 	m.replace(name, cancel)
 
-	go m.run(ctx, name, s, runImmediately, fn)
+	go m.run(ctx, name, s, runImmediately, firstRun, fn)
 	return nil
 }
 
@@ -165,17 +179,31 @@ func (m *Manager) replace(name string, cancel context.CancelFunc) {
 	m.jobs[name] = job{cancel: cancel}
 }
 
-func (m *Manager) run(ctx context.Context, name string, s schedule, runImmediately bool, fn Func) {
+func (m *Manager) run(ctx context.Context, name string, s schedule, runImmediately bool, firstRun time.Time, fn Func) {
 	if runImmediately {
 		go safeRun(ctx, name, fn)
 	}
 
-	nextTick := s.Next(time.Now())
+	var nextTick time.Time
+	now := time.Now()
+	if !firstRun.IsZero() {
+		if firstRun.After(now) {
+			nextTick = firstRun
+		} else {
+			nextTick = now
+		}
+	} else {
+		nextTick = s.Next(now)
+	}
 	if nextTick.IsZero() {
 		logger.Warnf("scheduler", "corn job %s has no next run time", name)
 		return
 	}
-	timer := time.NewTimer(time.Until(nextTick))
+	delay := time.Until(nextTick)
+	if delay < 0 {
+		delay = 0
+	}
+	timer := time.NewTimer(delay)
 	defer timer.Stop()
 
 	for {
@@ -184,7 +212,11 @@ func (m *Manager) run(ctx context.Context, name string, s schedule, runImmediate
 			return
 		case <-timer.C:
 			go safeRun(ctx, name, fn)
-			nextTick = s.Next(nextTick)
+			base := time.Now()
+			if nextTick.After(base) {
+				base = nextTick
+			}
+			nextTick = s.Next(base)
 			if nextTick.IsZero() {
 				return
 			}

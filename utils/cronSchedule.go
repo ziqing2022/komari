@@ -216,6 +216,53 @@ func ComputeNextCronRun(task *models.CronTask, now time.Time) *time.Time {
 	return &nextRun
 }
 
+// resolveScheduledFirstRun 计算任务重载后真实的首次触发时刻，保持原有 NextRunAt 不因重启/编辑其它任务被重置，
+// 对已错过调度窗口的周期性任务在宽限延迟后补执行，并同步持久化对齐 DB。
+func resolveScheduledFirstRun(task *models.CronTask, now time.Time) (time.Time, bool) {
+	if task == nil || !task.Enabled {
+		return time.Time{}, false
+	}
+
+	if task.ScheduleType == "cron" {
+		next := ComputeNextCronRun(task, now)
+		if next == nil {
+			return time.Time{}, false
+		}
+		if task.NextRunAt == nil || !task.NextRunAt.Equal(*next) {
+			task.NextRunAt = next
+			return *next, true
+		}
+		return *next, false
+	}
+
+	intervalMins := task.IntervalMinutes
+	if intervalMins <= 0 {
+		intervalMins = 30
+	}
+	interval := time.Duration(intervalMins) * time.Minute
+
+	var planned time.Time
+	switch {
+	case task.NextRunAt != nil && !task.NextRunAt.IsZero():
+		planned = task.NextRunAt.UTC()
+	case task.LastRunAt != nil && !task.LastRunAt.IsZero():
+		planned = task.LastRunAt.UTC().Add(interval)
+	default:
+		planned = now.Add(interval).UTC()
+	}
+
+	if planned.After(now) {
+		changed := task.NextRunAt == nil || !task.NextRunAt.Equal(planned)
+		task.NextRunAt = &planned
+		return planned, changed
+	}
+
+	// 已错过的周期任务：延迟 30 秒等待面板启动后 Agent 重新上线再补跑一次
+	catchUp := now.Add(30 * time.Second).UTC()
+	task.NextRunAt = &catchUp
+	return catchUp, true
+}
+
 // ReloadCronSchedule 重新加载并注册所有启用的定时任务到系统调度器
 func ReloadCronSchedule() error {
 	scheduler.RemovePrefix("cron:")
@@ -226,18 +273,27 @@ func ReloadCronSchedule() error {
 		return err
 	}
 
+	now := time.Now().UTC()
 	for _, t := range cronTasks {
 		task := t
 		spec := ""
 		if task.ScheduleType == "cron" && strings.TrimSpace(task.CronExpression) != "" {
 			spec = strings.TrimSpace(task.CronExpression)
-		} else if task.IntervalMinutes > 0 {
-			spec = scheduler.Every(time.Duration(task.IntervalMinutes) * time.Minute)
+		} else {
+			intervalMins := task.IntervalMinutes
+			if intervalMins <= 0 {
+				intervalMins = 30
+			}
+			spec = scheduler.Every(time.Duration(intervalMins) * time.Minute)
 		}
 
 		if spec != "" {
+			firstRun, changed := resolveScheduledFirstRun(&task, now)
+			if changed && task.NextRunAt != nil {
+				_ = db.Model(&models.CronTask{}).Where("id = ?", task.Id).Update("next_run_at", task.NextRunAt).Error
+			}
 			jobName := fmt.Sprintf("cron:%s", task.Id)
-			err := scheduler.AddContextFunc(jobName, spec, false, func(ctx context.Context) {
+			err := scheduler.AddContextFuncAt(jobName, spec, firstRun, func(ctx context.Context) {
 				var current models.CronTask
 				if err := db.Where("id = ?", task.Id).First(&current).Error; err == nil && current.Enabled {
 					_, _ = ExecuteCronTask(&current)
